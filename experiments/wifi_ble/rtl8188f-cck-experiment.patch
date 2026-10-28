@@ -1,0 +1,40 @@
+--- a/drivers/net/wireless/realtek/rtl8xxxu/core.c
++++ b/drivers/net/wireless/realtek/rtl8xxxu/core.c
+@@ -21,6 +21,10 @@
+ 
+ int rtl8xxxu_debug;
+ static bool rtl8xxxu_ht40_2g;
++/* Isolated CCK experiment; disabled for all normal AirBridge traffic. */
++static bool airbridge_cck;
++module_param(airbridge_cck, bool, 0600);
++MODULE_PARM_DESC(airbridge_cck, "Enable marked AirBridge 11Mbps CCK test frames");
+ static bool rtl8xxxu_dma_aggregation;
+ static int rtl8xxxu_dma_agg_timeout = -1;
+ static int rtl8xxxu_dma_agg_pages = -1;
+@@ -5643,6 +5647,26 @@
+ 
+ 	priv->fops->fill_txdesc(hw, hdr, tx_info, tx_desc, sgi, short_preamble,
+ 				ampdu_enable, rts_rate, macid);
++
++	/* Only our explicit vendor-action probe is changed. Preserve normal AWDL.
++	 * The marker is outside the synthesized payload, at MAC-body offset 24.
++	 * RTL8188F uses the 40-byte gen2 descriptor; rate 3 is 11Mbps CCK.
++	 */
++	if (airbridge_cck && priv->rtl_chip == RTL8188F && pktlen >= 32 &&
++	    (tx_info->flags & IEEE80211_TX_CTL_INJECTED) &&
++	    ieee80211_is_action(hdr->frame_control) &&
++	    !memcmp((u8 *)hdr + 24, "\x7f\x00\xe0\x25" "ABW1", 8)) {
++		struct rtl8xxxu_txdesc40 *test_desc = (void *)tx_desc;
++
++		test_desc->txdw3 |= cpu_to_le32(TXDESC40_USE_DRIVER_RATE | BIT(10));
++		test_desc->txdw4 &= cpu_to_le32(~(0x7fU | TXDESC40_DATA_RATE_FB_MASK |
++				TXDESC40_RETRY_LIMIT_MASK));
++		test_desc->txdw4 |= cpu_to_le32(DESC_RATE_11M | TXDESC40_RETRY_LIMIT_ENABLE);
++		test_desc->txdw8 &= cpu_to_le32(~TXDESC40_HW_SEQ_ENABLE);
++		dev_info_ratelimited(dev, "AirBridge CCK probe: bytes=%u rate=%u seq=%u\n",
++			pktlen, le32_to_cpu(test_desc->txdw4) & 0x7f,
++			le16_to_cpu(hdr->seq_ctrl));
++	}
+ 
+ 	rtl8xxxu_calc_tx_desc_csum(tx_desc);
+ 

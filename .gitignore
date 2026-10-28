@@ -1,0 +1,14 @@
+/target/
+/build/
+/app/dist/
+/.tools/
+/reference/
+/output/
+/received/
+*.log
+/.xwin-cache/
+/*.exe
+__pycache__/
+*.pyc
+/DEVICE-TEST-*.md
+/UI-UPDATE-*.md

@@ -1,0 +1,15 @@
+[package]
+name = "airbridge-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "airbridge-ui"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+rfd = "0.16"
+serde_json.workspace = true

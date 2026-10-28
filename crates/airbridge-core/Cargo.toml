@@ -1,0 +1,17 @@
+[package]
+name = "airbridge-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+flate2.workspace = true
+plist.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+owly-airdrop = { git = "https://github.com/t4t5/owly", rev = "9a676e11d011c34ea32798a2541f2b1eeb66e731", default-features = false }
+
+[dev-dependencies]
+serde_json.workspace = true
+

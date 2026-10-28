@@ -1,0 +1,16 @@
+[package]
+name = "airbridge-radio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+anyhow.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+socket2 = { version = "0.6", features = ["all"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Pinned low-level protocol libraries; AirBridge owns the application and service.
+owly-awdl = { git = "https://github.com/t4t5/owly", rev = "9a676e11d011c34ea32798a2541f2b1eeb66e731", features = ["driver"] }
+owly-radio = { git = "https://github.com/t4t5/owly", rev = "9a676e11d011c34ea32798a2541f2b1eeb66e731" }
+owly-airdrop = { git = "https://github.com/t4t5/owly", rev = "9a676e11d011c34ea32798a2541f2b1eeb66e731", default-features = false }
