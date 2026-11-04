@@ -42,10 +42,15 @@ impl Channel {
         }
     }
 
-    /// Its operating class in the opclass encoding (AWDL-10): 81 on 2.4 GHz,
-    /// 128 on 5 GHz.
+    /// Advertise the local HT20 channel width on the AWDL social channels.
+    /// Slots copied from another peer retain that peer's operating class.
     pub const fn opclass(self) -> u8 {
-        if self.0 <= 14 { 0x51 } else { 0x80 }
+        match self.0 {
+            44 => 115,
+            149 => 124,
+            0..=14 => 81,
+            _ => 128,
+        }
     }
 
     /// One slot naming this channel, in the opclass encoding.
@@ -310,6 +315,9 @@ mod tests {
 
     #[test]
     fn channels_have_frequencies() {
+        assert_eq!(Channel(6).slot(), [6, 81]);
+        assert_eq!(Channel(44).slot(), [44, 115]);
+        assert_eq!(Channel(149).slot(), [149, 124]);
         assert_eq!(Channel(6).freq_mhz(), Some(2437));
         assert_eq!(Channel(44).freq_mhz(), Some(5220));
         assert_eq!(Channel(149).freq_mhz(), Some(5745));

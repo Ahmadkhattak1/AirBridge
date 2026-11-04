@@ -67,6 +67,31 @@ impl Ipv6Packet {
         addrs(&self.data)
     }
 
+    fn direct_tcp(&self) -> Option<(&[u8], usize)> {
+        if self.addrs()? != (self.src.link_local(), self.dst.link_local()) {
+            return None;
+        }
+        let tcp = upper(&self.data, TCP)?;
+        if tcp.len() < 20 {
+            return None;
+        }
+        let header = usize::from(tcp[12] >> 4) * 4;
+        if header < 20 || header > tcp.len() {
+            return None;
+        }
+        Some((tcp, header))
+    }
+
+    pub(crate) fn expected_ack_ports(&self) -> Option<[u8; 4]> {
+        let (tcp, header) = self.direct_tcp()?;
+        (tcp[13] & !0x08 == 0x10 && header < tcp.len()).then(|| [tcp[2], tcp[3], tcp[0], tcp[1]])
+    }
+
+    pub(crate) fn pure_ack_ports(&self) -> Option<[u8; 4]> {
+        let (tcp, header) = self.direct_tcp()?;
+        (tcp[13] == 0x10 && header == tcp.len()).then(|| [tcp[0], tcp[1], tcp[2], tcp[3]])
+    }
+
     /// A TCP SYN to `local` carrying nothing else: the start of a
     /// connection, as a peer opens one.
     pub fn is_bare_syn_to(&self, local: MacAddr) -> bool {

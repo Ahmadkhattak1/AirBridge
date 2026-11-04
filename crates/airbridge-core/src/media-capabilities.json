@@ -1,0 +1,21 @@
+{
+  "Version": 1,
+  "Codecs": {
+    "hvc1": {
+      "Profiles": {
+        "VTIsHDRAllowedOnDevice": true,
+        "VTPerProfileSupport": {
+          "1": { "VTMaxPlaybackLevel": 186 },
+          "2": { "VTMaxPlaybackLevel": 186 },
+          "3": {}
+        },
+        "VTSupportedProfiles": [1, 2, 3]
+      }
+    }
+  },
+  "ContainerFormats": {
+    "public.heif-standard": {
+      "HeifSubtypes": ["public.avci", "public.heic", "public.heif"]
+    }
+  }
+}

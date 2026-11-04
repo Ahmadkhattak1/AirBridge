@@ -129,6 +129,64 @@ fn transmits(actions: &[Action]) -> Vec<&frame::Frame> {
 
 const PHONE_SEQ: [u8; SLOTS] = [149, 149, 149, 0, 0, 0, 0, 0, 6, 149, 149, 0, 0, 0, 0, 0];
 
+#[test]
+fn observed_tcp_data_allows_only_one_timely_ack_for_that_peer_and_flow() {
+    // The Mac's data schedule had a single channel-6 slot (index 8).
+    let mut channels = [149; SLOTS];
+    channels[8] = 6;
+    let mut inbound = tcp_syn();
+    inbound.data[40..44].copy_from_slice(&[1, 2, 3, 4]);
+    inbound.data[53] = 0x18;
+    inbound.data[5] += 1;
+    inbound.data.push(42);
+
+    let mut ack = tcp_syn();
+    ack.src = US;
+    ack.dst = PHONE;
+    ack.data[8..24].copy_from_slice(&US.link_local().octets());
+    ack.data[24..40].copy_from_slice(&PHONE.link_local().octets());
+    ack.data[40..44].copy_from_slice(&[3, 4, 1, 2]);
+    ack.data[53] = 0x10;
+    for (enabled, delay, flags, port, expected) in [
+        (true, 200, 0x10, 3, true),
+        (false, 200, 0x10, 3, false),
+        (true, TU + 1, 0x10, 3, false),
+        (true, 200, 0x02, 3, false),
+        (true, 200, 0x10, 7, false),
+    ] {
+        let mut cfg = Config::new(
+            US,
+            "AirBridge",
+            RadioConstraints {
+                channel: Channel(6),
+                presence: Presence::Fixed,
+            },
+        );
+        cfg.rx_reply = enabled;
+        cfg.neighbour_echo = false;
+        let mut n = Node::new(cfg, START);
+        let t = meet(&mut n, &seq(channels)).plus(8000);
+        assert!(!n.may_send(PHONE, t));
+        feed(&mut n, t, &data_from_phone(&inbound));
+        let mut packet = ack.clone();
+        packet.data[53] = flags;
+        packet.data[40] = port;
+        for first in [true, false] {
+            let actions: Vec<_> = n
+                .handle(Input::Outbound {
+                    now: t.plus(delay),
+                    packet: packet.clone(),
+                })
+                .collect();
+            assert_eq!(
+                transmits(&actions).iter().any(|f| f.to == PHONE),
+                expected && first
+            );
+        }
+        assert_eq!(n.stats().tx_observed_replies, u64::from(expected));
+    }
+}
+
 // spec: AWDL-12
 #[test]
 fn a_fixed_radio_advertises_its_channel_in_every_slot() {

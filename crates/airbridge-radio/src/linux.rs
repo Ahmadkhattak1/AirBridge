@@ -60,13 +60,14 @@ async fn start() -> Result<()> {
     cfg.rate = TxRate::parse(&rate).context("invalid --tx-rate")?;
     cfg.ht.rx_mcs = (1u32 << (rx_streams * 8)) - 1;
     cfg.amsdu = true;
+    cfg.rx_reply = args.iter().any(|arg| arg == "--rx-reply");
     // Opt in only on radio setups that supply hardware Block Ack reception.
     cfg.accept_addba = args.iter().any(|arg| arg == "--rx-ampdu");
     println!(
         "{}",
         serde_json::json!({"event":"radio-config", "tx_rate":cfg.rate.to_string(),
         "tx_amsdu":cfg.amsdu, "rx_ampdu":cfg.accept_addba, "channel":channel,
-        "rx_streams":rx_streams})
+        "rx_streams":rx_streams, "rx_reply":cfg.rx_reply})
     );
     let (peer_tx, mut peers) = watch::channel(Vec::new());
     let node = Native::start(&monitor, "awdl0", cfg, peer_tx)?;

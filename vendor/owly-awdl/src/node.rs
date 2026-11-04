@@ -112,6 +112,8 @@ pub struct Config {
     pub no_ack: bool,
     /// Accept a peer's Block Ack session (AWDL-15).
     pub accept_addba: bool,
+    /// Permit one immediate TCP ACK after receiving data on a fixed radio.
+    pub rx_reply: bool,
     /// Send unicast packets to one peer as A-MSDUs, up to the peer's limit.
     pub amsdu: bool,
     /// The largest frame the radio takes, MAC header included.
@@ -137,6 +139,7 @@ impl Config {
             ht: HtCapabilities::ONE_STREAM,
             no_ack,
             accept_addba: false,
+            rx_reply: false,
             amsdu: false,
             max_frame: 2304,
             rssi_threshold: Some(-65),
@@ -156,6 +159,7 @@ pub struct Stats {
     pub tx_unicast: u64,
     pub tx_multicast: u64,
     pub tx_amsdu: u64,
+    pub tx_observed_replies: u64,
     pub delivered: u64,
     pub dropped_no_peer: u64,
     pub dropped_queue_full: u64,
@@ -494,6 +498,16 @@ impl Node {
                 if packet.dst == self.cfg.addr && packet.is_echo_reply(ECHO_ID) {
                     continue;
                 }
+                if self.cfg.rx_reply
+                    && self.fixed()
+                    && header.dst == self.cfg.addr
+                    && packet.src == src
+                    && packet.dst == self.cfg.addr
+                    && let Some(ports) = packet.expected_ack_ports()
+                    && let Some(peer) = self.peers.get_mut(&src)
+                {
+                    peer.reply = Some((now, ports));
+                }
                 self.stats.delivered += 1;
                 out.push(Action::Deliver(packet));
             } else if packet.is_bare_syn_to(self.cfg.addr) {
@@ -800,12 +814,23 @@ impl Node {
         let mut blocked: Vec<MacAddr> = Vec::new();
         while let Some(q) = items.pop_front() {
             let dst = q.packet.dst;
-            let open = *sent < BURST
-                && !blocked.contains(&dst)
+            let scheduled = self
+                .peers
+                .get(&dst)
+                .is_some_and(|p| self.unicast_wait(p, now) == 0);
+            // Some data arrives outside the peer's announced slots. Allow one
+            // immediate ACK on observed presence, never a batch or later retry.
+            let observed = !scheduled
                 && self
                     .peers
                     .get(&dst)
-                    .is_some_and(|p| self.unicast_wait(p, now) == 0);
+                    .and_then(|p| p.reply)
+                    .is_some_and(|(at, ports)| {
+                        now.since(at) <= TU
+                            && self.clock.slot(at) == self.clock.slot(now)
+                            && q.packet.pure_ack_ports() == Some(ports)
+                    });
+            let open = *sent < BURST && !blocked.contains(&dst) && (scheduled || observed);
             if !open {
                 if !blocked.contains(&dst) {
                     blocked.push(dst);
@@ -813,10 +838,14 @@ impl Node {
                 waiting.push_back(q);
                 continue;
             }
-            let peer = &self.peers[&dst];
+            let peer = self.peers.get_mut(&dst).expect("open peer");
+            if observed {
+                peer.reply = None;
+                self.stats.tx_observed_replies += 1;
+            }
             let rate = self.cfg.rate.for_peer(peer.ht.as_ref());
             let mut batch = Vec::from([q]);
-            if self.cfg.amsdu && peer.ht.is_some() {
+            if scheduled && self.cfg.amsdu && peer.ht.is_some() {
                 let limit = peer
                     .ht
                     .map_or(AMSDU_DEFAULT_MAX, |h| h.max_amsdu())

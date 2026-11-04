@@ -1,5 +1,20 @@
 #!/usr/bin/env bash
 # Shared catalog selection. Keep this independent of radio/service mutations.
+# Only use frequencies iw explicitly lists for initiating an HT20 AP. Its
+# unrestricted frequency lines end after the transmit power in dBm.
+awdl_channel() {
+    awk '
+        NF == 6 && $1 == "*" && $3 == "MHz" && $6 == "dBm)" {
+            if ($2 == 5745 && $4 == "[149]") high = 1
+            if ($2 == 2437 && $4 == "[6]") low = 1
+        }
+        END {
+            if (high) print 149
+            else if (low) print 6
+            else exit 1
+        }'
+}
+
 select_adapter() {
     local catalog=$1 devices=$2 usb id profile
     local -a matches=() profiles=()

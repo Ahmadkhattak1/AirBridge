@@ -166,6 +166,12 @@ phy=$(basename "$(readlink -f "/sys/class/net/$radio/phy80211")")
 mac=$(cat "/sys/class/net/$radio/address")
 rx_streams=1
 phy_info=$(iw phy "$phy" info)
+channel=$(awdl_channel <<< "$phy_info") || {
+    echo 'No permitted AirBridge transfer channel is available on this adapter.' >&2
+    exit 3
+}
+hw_mode=g
+[[ "$channel" == 6 ]] || hw_mode=a
 if grep -E 'HT RX MCS rate indexes supported:.*0-15' <<< "$phy_info" >/dev/null; then
     rx_streams=2
 fi
@@ -201,8 +207,8 @@ interface=abap0
 driver=nl80211
 ssid=AirBridge-radio
 ignore_broadcast_ssid=1
-hw_mode=g
-channel=6
+hw_mode=$hw_mode
+channel=$channel
 ieee80211n=1
 beacon_int=1000
 wpa=2
@@ -228,7 +234,10 @@ port=8770
 [[ "$mode" != send ]] || port=0
 node_args=()
 node_args+=(--tx-rate "${AIRBRIDGE_TX_RATE:-$tx_rate}")
-node_args+=(--channel 6 --rx-streams "$rx_streams")
+node_args+=(--channel "$channel" --rx-streams "$rx_streams")
+if [[ "$mode" == receive && ${AIRBRIDGE_RX_REPLY:-1} == 1 ]]; then
+    node_args+=(--rx-reply)
+fi
 if [[ "$mode" == receive && ${AIRBRIDGE_RX_AMPDU:-1} == 1 ]]; then
     node_args+=(--rx-ampdu)
 fi

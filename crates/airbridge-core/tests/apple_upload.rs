@@ -61,6 +61,10 @@ fn receiver_declares_original_heif_and_hevc_support() {
     .unwrap();
     let response = decode_discover_response(&bytes).unwrap();
     let caps: serde_json::Value = serde_json::from_slice(&response.media_capabilities).unwrap();
+    assert_eq!(
+        caps["Codecs"]["hvc1"]["Profiles"]["VTIsHDRAllowedOnDevice"].as_bool(),
+        Some(true)
+    );
     assert!(
         caps["ContainerFormats"]["public.heif-standard"]["HeifSubtypes"]
             .as_array()

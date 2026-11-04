@@ -9,6 +9,25 @@ CATALOG = ROOT / "runtime/adapters.tsv"
 
 
 class AdapterCatalog(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "Exercises Linux radio channel selection")
+    def test_selects_only_permitted_transfer_channels(self):
+        low = "* 2437.0 MHz [6] (20.0 dBm)"
+        high = "* 5745 MHz [149] (23.0 dBm)"
+        for frequencies, expected in [
+            ([low], "6"), ([low, high], "149"), ([high, low], "149"),
+            ([low, high + " (no IR)"], "6"), ([low, high + " (radar detection)"], "6"),
+            ([low, "* 5745 MHz [149] (disabled)"], "6"),
+            ([low + " (no IR)", "* 5180 MHz [36] (23.0 dBm)"], None),
+        ]:
+            with self.subTest(frequencies=frequencies):
+                run = subprocess.run(
+                    ["bash", "-c", 'source "$1"; awdl_channel', "channel-test",
+                     str(ROOT / "runtime/adapter-profile.sh")],
+                    input="\n".join(frequencies), capture_output=True, text=True, timeout=5,
+                )
+                self.assertEqual(run.returncode, int(expected is None))
+                self.assertEqual(run.stdout.strip(), expected or "")
+
     def test_profiles_are_unique_and_use_packaged_firmware(self):
         ids = set()
         chips = set()

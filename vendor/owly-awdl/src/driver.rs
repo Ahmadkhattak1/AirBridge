@@ -437,10 +437,11 @@ impl<A: Air, N: Netif> Driver<A, N> {
         // Bytes count IPv6 packets delivered to the host, including TCP
         // retransmissions. File goodput is measured by the receiver separately.
         println!(
-            "{{\"event\":\"radio-measurement\",\"elapsed_us\":{},\"received_ipv6_bytes\":{},\"rx_frames\":{},\"radio_queue_full\":{},\"radio_dropped\":{}}}",
+            "{{\"event\":\"radio-measurement\",\"elapsed_us\":{},\"received_ipv6_bytes\":{},\"rx_frames\":{},\"observed_reply_attempts\":{},\"radio_queue_full\":{},\"radio_dropped\":{}}}",
             self.epoch.elapsed().as_micros(),
             self.tx.delivered_bytes,
             s.rx_data,
+            s.tx_observed_replies,
             self.tx.again,
             self.tx.dropped,
         );

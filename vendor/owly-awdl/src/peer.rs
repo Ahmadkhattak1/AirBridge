@@ -19,6 +19,8 @@ pub struct Peer {
     pub rssi: Option<i8>,
     /// When it was last heard, by action or data frame.
     pub last_seen: Time,
+    /// Latest observed local unicast TCP data, and ports for its reply.
+    pub(crate) reply: Option<(Time, [u8; 4])>,
     pub election: Election,
     pub sequence: Option<Sequence>,
     /// How far its AW schedule is ahead of ours, in µs.
@@ -54,6 +56,7 @@ impl Peer {
             devclass: 0,
             rssi: None,
             last_seen: now,
+            reply: None,
             election: Election::own(mac),
             sequence: None,
             sync_offset_us: None,

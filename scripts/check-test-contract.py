@@ -22,6 +22,8 @@ REQUIRED = {
     "continuous_radio_input_does_not_starve_host_acknowledgments",
     "queue_backpressure_stops_host_reads_while_radio_keeps_receiving",
     "advertised_ht_mask_preserves_all_receive_streams",
+    "receiver_declares_original_heif_and_hevc_support",
+    "observed_tcp_data_allows_only_one_timely_ack_for_that_peer_and_flow",
 }
 
 if __name__ == "__main__":
