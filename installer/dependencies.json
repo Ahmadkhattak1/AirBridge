@@ -1,0 +1,18 @@
+{
+  "kernel": "6.18.33.2-microsoft-standard-WSL2",
+  "ubuntu": {
+    "url": "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.4-base-amd64.tar.gz",
+    "sha256": "c1e67ef7b17a6300e136118bd1dc04725009cb376c1aad10abcf8cd453628d58",
+    "file": "ubuntu-base.tar.gz"
+  },
+  "wsl": {
+    "url": "https://github.com/microsoft/WSL/releases/download/2.7.13/wsl.2.7.13.0.x64.msi",
+    "sha256": "a3505a50f4cc585551d11d9de824ba4375448d7a68f2e71d3fb315fa986fc754",
+    "file": "wsl.msi"
+  },
+  "usbipd": {
+    "url": "https://github.com/dorssel/usbipd-win/releases/download/v5.3.0/usbipd-win_5.3.0_x64.msi",
+    "sha256": "1c984914aec944de19b64eff232421439629699f8138e3ddc29301175bc6d938",
+    "file": "usbipd.msi"
+  }
+}

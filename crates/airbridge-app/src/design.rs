@@ -188,6 +188,7 @@ pub fn show(app: &mut AirBridgeApp, ctx: &egui::Context) {
                     if icon_button(ui, Icon::Folder, "Save location").clicked() {
                         app.show_folder = !app.show_folder;
                     }
+                    connection_menu(app, ui);
                     if app.preview {
                         label(ui, "Design preview", 12.0, MUTED);
                     }
@@ -270,30 +271,111 @@ fn home(app: &mut AirBridgeApp, ui: &mut egui::Ui) {
             }
         });
     });
-    if !app.preview {
-        ui.add_space(18.0);
-        let summary = if app.hardware_checking {
-            "Checking your adapter…"
-        } else {
-            app.hardware
-                .as_ref()
-                .map(|r| r.summary.as_str())
-                .unwrap_or("Adapter not checked")
-        };
-        label(ui, summary, 13.0, MUTED);
-        ui.add_enabled_ui(!app.hardware_checking, |ui| {
-            if ui.small_button("Check again").clicked() {
-                app.check_hardware();
-            }
+}
+
+fn connection_menu(app: &AirBridgeApp, ui: &mut egui::Ui) {
+    let checking = app.hardware_checking && !app.preview;
+    let ready = app.hardware_ready();
+    let (title, color) = if checking {
+        ("Connecting…", MUTED)
+    } else if ready {
+        ("Ready", GREEN)
+    } else {
+        ("Needs attention", Color32::from_rgb(173, 93, 29))
+    };
+    let response = ui
+        .add(
+            egui::Button::new(
+                RichText::new(format!("   {title}    "))
+                    .size(13.0)
+                    .color(color),
+            )
+            .fill(if ready {
+                Color32::from_rgb(233, 246, 240)
+            } else {
+                TINT
+            })
+            .corner_radius(18)
+            .min_size(vec2(100.0, 34.0)),
+        )
+        .on_hover_text("Connection & compatibility");
+    let rect = response.rect;
+    ui.painter()
+        .circle_filled(pos2(rect.left() + 14.0, rect.center().y), 3.0, color);
+    let tip = pos2(rect.right() - 14.0, rect.center().y + 2.0);
+    ui.painter().add(Shape::line(
+        vec![tip + vec2(-3.0, -3.0), tip, tip + vec2(3.0, -3.0)],
+        Stroke::new(1.2, color),
+    ));
+    egui::Popup::menu(&response)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.set_width(300.0);
+            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.spacing_mut().item_spacing.y = 12.0;
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new("Connection & compatibility")
+                        .size(16.0)
+                        .strong(),
+                );
+                let summary = if checking {
+                    "Preparing your connection automatically…"
+                } else if app.preview {
+                    "Ready to send and receive"
+                } else {
+                    app.hardware
+                        .as_ref()
+                        .map_or("Checking your connection…", |r| r.summary.as_str())
+                };
+                ui.add(egui::Label::new(RichText::new(summary).size(14.0)).wrap());
+                label(
+                    ui,
+                    "AirBridge reconnects automatically when your adapter is plugged in.",
+                    13.0,
+                    MUTED,
+                );
+                if let Some(report) = &app.hardware {
+                    if !ready && !checking {
+                        ui.separator();
+                        egui::CollapsingHeader::new("Device details").show(ui, |ui| {
+                            egui::ScrollArea::vertical()
+                                .max_height(180.0)
+                                .show(ui, |ui| {
+                                    ui.add(
+                                        egui::Label::new(RichText::new(&report.details).size(12.0))
+                                            .wrap()
+                                            .selectable(true),
+                                    );
+                                });
+                        });
+                    }
+                    ui.separator();
+                    let id = egui::Id::new("compatibility-copied");
+                    let now = ui.input(|i| i.time);
+                    let copied = ui
+                        .ctx()
+                        .data(|d| d.get_temp::<f64>(id))
+                        .is_some_and(|at| now - at < 2.0);
+                    if ui
+                        .add_sized(
+                            [300.0, 34.0],
+                            egui::Button::new(
+                                RichText::new(if copied { "Copied" } else { "Copy diagnostics" })
+                                    .color(BLUE),
+                            )
+                            .fill(TINT)
+                            .corner_radius(9),
+                        )
+                        .clicked()
+                    {
+                        ui.ctx().copy_text(report.details.clone());
+                        ui.ctx().data_mut(|d| d.insert_temp(id, now));
+                    }
+                }
+                ui.add_space(6.0);
+            });
         });
-        ui.collapsing("Device details & compatibility", |ui| {
-            label(ui, "This release supports USB 0bda:f179 only. Other adapters need testing and driver support.", 13.0, MUTED);
-            if let Some(report) = &app.hardware {
-                if ui.button("Copy compatibility report").clicked() { ui.ctx().copy_text(report.details.clone()); }
-                ui.add(egui::Label::new(RichText::new(&report.details).size(12.0)).wrap());
-            }
-        });
-    }
 }
 fn action_tile(ui: &mut egui::Ui, title: &str, kind: Icon, width: f32) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(vec2(width, 146.0), Sense::click());

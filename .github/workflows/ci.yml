@@ -1,0 +1,50 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      RUSTUP_TOOLCHAIN: 1.95.0
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install Rust
+        run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+      - name: Format
+        run: cargo +1.95.0 fmt --all --check
+      - name: Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libasound2-dev
+      - name: Regression tests
+        run: cargo +1.95.0 test --workspace --locked
+      - name: Required regression coverage
+        run: python scripts/check-test-contract.py
+      - name: Build release
+        run: cargo +1.95.0 build --release --workspace --locked
+      - name: Packaging tests
+        run: python -m unittest discover -s scripts/tests -v
+      - name: Runtime shell syntax
+        if: runner.os == 'Linux'
+        run: bash -n runtime/airbridge-radio.sh runtime/bootstrap.sh scripts/package-runtime.sh
+      - name: Setup script syntax
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $errorsFound = $null
+          $tokensFound = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path installer/Setup-Runtime.ps1), [ref]$tokensFound, [ref]$errorsFound) | Out-Null
+          if ($errorsFound.Count) { throw ($errorsFound | Out-String) }

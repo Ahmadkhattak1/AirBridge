@@ -133,7 +133,7 @@ pub fn decode_upload(bytes: &[u8], content_type: &str, limit: usize) -> Result<V
     }
 }
 
-fn validate_path(value: &str) -> Result<()> {
+pub(crate) fn validate_path(value: &str) -> Result<()> {
     // The Linux receiver writes to Windows; enforce Windows rules on both OSes.
     if value.is_empty()
         || value.len() > 1024

@@ -16,7 +16,7 @@ fi
 vendor=0bda
 product=f179
 run=/run/airbridge
-logs="$run/logs"
+logs=/var/log/airbridge
 if [[ "$mode" == stop ]]; then
     [[ -f "$run/session.pid" ]] || exit 0
     read -r pid started < "$run/session.pid"
@@ -32,9 +32,9 @@ if [[ "$mode" == stop ]]; then
     echo 'AirBridge cleanup is still running' >&2
     exit 1
 fi
-[[ "$mode" == receive || "$mode" == probe || "$mode" == send ]] || exit 2
-mkdir -p "$logs" /mnt/wsl/airbridge-firmware
-[[ "$mode" == send ]] || mkdir -p "$destination"
+[[ "$mode" == receive || "$mode" == probe || "$mode" == prepare || "$mode" == send ]] || exit 2
+mkdir -p "$run" "$logs" /mnt/wsl/airbridge-firmware
+[[ "$mode" == receive || "$mode" == probe ]] && mkdir -p "$destination"
 
 exec 9>"$run/session.lock"
 flock -n 9 || { echo '{"event":"error","message":"AirBridge is already running"}'; exit 75; }
@@ -55,7 +55,10 @@ firmware_parameter=/sys/module/firmware_class/parameters/path
 firmware_original=$(cat "$firmware_parameter")
 
 cleanup() {
-    trap - EXIT INT TERM
+    trap - EXIT
+    # Multiple Windows shutdown helpers can overlap. A second TERM must not
+    # kill this shell halfway through restoring the radio and removing state.
+    trap '' INT TERM
     local p
     for p in "$tail_pid" "$publisher_pid" "$receiver_pid" "$owl_pid" "$avahi_pid" "$hostapd_pid"; do
         [[ -z "$p" ]] || kill "$p" 2>/dev/null || true
@@ -110,9 +113,9 @@ done
     exit 2
 }
 
-cp -a "$root/firmware/." /mnt/wsl/airbridge-firmware/
-cp /lib/firmware/regulatory.db /mnt/wsl/airbridge-firmware/
-[[ ! -f /lib/firmware/regulatory.db.p7s ]] || cp /lib/firmware/regulatory.db.p7s /mnt/wsl/airbridge-firmware/
+cp -au "$root/firmware/." /mnt/wsl/airbridge-firmware/
+cp -u /lib/firmware/regulatory.db /mnt/wsl/airbridge-firmware/
+[[ ! -f /lib/firmware/regulatory.db.p7s ]] || cp -u /lib/firmware/regulatory.db.p7s /mnt/wsl/airbridge-firmware/
 printf '%s' /mnt/wsl/airbridge-firmware > "$firmware_parameter"
 
 modprobe cfg80211
@@ -123,8 +126,15 @@ if [[ "$mode" == send ]]; then
     if grep -q '^rtl8xxxu ' /proc/modules; then rmmod rtl8xxxu; fi
     experiment_loaded=1
     insmod "$root/modules/rtl8xxxu-cck-experiment.ko" airbridge_cck=1
-elif ! grep -q '^rtl8xxxu ' /proc/modules; then
-    insmod "$root/modules/rtl8xxxu.ko"
+elif [[ ${AIRBRIDGE_INJECT_RATE:-1} == 1 && -f "$root/modules/rtl8xxxu-awdl.ko" ]]; then
+    if [[ ! -f /sys/module/rtl8xxxu/parameters/airbridge_inject_rate ]]; then
+        if grep -q '^rtl8xxxu ' /proc/modules; then rmmod rtl8xxxu; fi
+        insmod "$root/modules/rtl8xxxu-awdl.ko" airbridge_inject_rate=1
+    fi
+    echo '{"event":"radio-driver","injection_rate":true}'
+else
+    if [[ -f /sys/module/rtl8xxxu/parameters/airbridge_inject_rate ]]; then rmmod rtl8xxxu; fi
+    if ! grep -q '^rtl8xxxu ' /proc/modules; then insmod "$root/modules/rtl8xxxu.ko"; fi
 fi
 
 usb=${matches[0]}
@@ -143,7 +153,16 @@ for _ in {1..50}; do
     [[ -n "$radio" ]] && break
     sleep 0.2
 done
-[[ -n "$radio" ]] || { dmesg | tail -n 20 >&2; exit 3; }
+[[ -n "$radio" ]] || {
+    echo 'The Wi-Fi adapter did not power on. Unplug it, then reconnect it.' >&2
+    dmesg | tail -n 20 >&2
+    exit 3
+}
+
+if [[ "$mode" == prepare ]]; then
+    echo '{"event":"adapter-ready"}'
+    exit 0
+fi
 
 ip link set "$radio" down
 iw dev "$radio" set type managed
@@ -202,6 +221,10 @@ rm -f "$run/radio.ready" "$run/approval"
 port=8770
 [[ "$mode" != send ]] || port=0
 node_args=()
+node_args+=(--tx-rate "${AIRBRIDGE_TX_RATE:-mcs7}")
+if [[ "$mode" == receive && ${AIRBRIDGE_RX_AMPDU:-1} == 1 ]]; then
+    node_args+=(--rx-ampdu)
+fi
 [[ "$mode" == receive ]] || node_args+=(--browse)
 RUST_LOG=info "$root/bin/airbridge-radio-node" --monitor abmon0 --name "$name" --port "$port" --ready-file "$run/radio.ready" "${node_args[@]}" >"$logs/radio.log" 2>&1 &
 owl_pid=$!
@@ -222,12 +245,24 @@ if [[ "$mode" == probe ]]; then
     exit 0
 fi
 
+wait_for_transfer() {
+    while kill -0 "$receiver_pid" 2>/dev/null; do
+        if [[ ! -d /sys/class/net/abmon0 ]] ||
+            ! kill -0 "$owl_pid" 2>/dev/null || ! kill -0 "$hostapd_pid" 2>/dev/null; then
+            echo '{"event":"error","message":"The Wi-Fi adapter disconnected. Reconnect it to try again."}'
+            return 6
+        fi
+        sleep 0.5
+    done
+    wait "$receiver_pid"
+}
+
 if [[ "$mode" == send ]]; then
     rm -f "$run/send-target"
     echo '{"event":"searching","message":"Looking for nearby AirDrop receivers"}'
     "$root/bin/airbridge" choose-send --radio-log "$logs/radio.log" --selection-file "$run/send-target" --name "$name" "${send_files[@]}" &
     receiver_pid=$!
-    if wait "$receiver_pid"; then exit 0; else exit $?; fi
+    if wait_for_transfer; then exit 0; else exit $?; fi
 fi
 
 address=$(ip -6 -o addr show dev awdl0 scope link | awk '{print $4}' | cut -d/ -f1)
@@ -244,6 +279,6 @@ grep -q '"event":"ready"' "$logs/receiver.log" || exit 5
 # Forward machine-readable receiver events to the Windows controller.
 tail -q -n +1 -f "$logs/receiver.log" "$logs/radio.log" &
 tail_pid=$!
-wait -n "$receiver_pid" "$owl_pid" "$hostapd_pid"
+wait_for_transfer
 echo '{"event":"error","message":"An AirBridge radio or receiver process stopped"}'
 exit 1

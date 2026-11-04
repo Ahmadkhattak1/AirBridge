@@ -1,32 +1,16 @@
-# AirBridge 0.1.0 preview
+# AirBridge 0.2.0
 
-Native Apple AirDrop for Windows — experimental developer preview.
+Windows setup installer for native iPhone AirDrop with the supported Realtek RTL8188FTV USB adapter (`0bda:f179`). See [installation instructions](docs/INSTALLATION.md).
 
-## Included
+- Installer supplies the radio runtime, verifies downloads, and sets up WSL and USB support when needed. A Windows restart may be required.
+- Automatic adapter preparation, runtime keep-alive, and connection recovery between sessions.
+- Compact connection menu at the top with copyable diagnostics and device details on failure.
+- Streaming reception with an 8 GiB encoded/decoded bound, temporary staging, archive validation, and cleanup after incomplete uploads.
+- Repeated offers for the same active transfer reuse approval. A different transfer cannot replace an upload in progress.
+- Completion acknowledges a validated archive even when the iPhone is waiting to finish its HTTP body, fixing the end-of-video failure.
+- Driver honors requested AWDL transmit rates and retry policy. The tested receive sample reached about 1.22 MB/s, with variation between runs.
+- Windows and Linux CI and a required inventory of critical regression tests.
 
-- Windows desktop application with progressive send/receive controls and explicit incoming-file acceptance.
-- Native iPhone-to-PC photo/video transfers and PC-to-iPhone transfers demonstrated on the development machine.
-- Original HEIC/HEIF reception.
-- Startup compatibility check, disabled transfer actions when prerequisites are missing, and a refresh action after connecting an adapter.
-- Expandable, copyable compatibility report containing device model IDs, driver versions/provider and Windows version. No serial numbers, network addresses or file contents are included.
-- Balanced signal-logo spacing.
+The receiver remains Everyone-style with explicit acceptance, without Apple Account/Contacts Only integration. Sending is limited to 512 MiB. Only the named adapter and the WSL kernel in the installer are supported. The installer is unsigned. Fresh Windows feature activation/reboot has not been exercised on a separate clean PC. The runtime is tested through an isolated fresh import on the development machine. Wider hardware/iOS compatibility and long-duration reliability remain areas for further testing.
 
-## Before downloading
-
-**The EXE is not a complete installer.** Transfers require an already provisioned `AirBridgeRuntime` WSL2 distribution, matching Linux kernel modules/firmware, and usbipd-win USB sharing. Those components are not bundled in this preview. A normal Windows Wi-Fi driver alone is insufficient. Without this setup the application can display compatibility information, but cannot transfer files.
-
-Only the RTL8188FTV USB adapter with ID `0bda:f179` has been verified. Other adapters are not enabled in this release. The report helps contributors request support; it does not prove radio compatibility.
-
-The receive service currently caps uploads/decoded archives at 512 MiB. Long transfers across the iPhone's ten-minute discovery expiry, wider iOS compatibility and interruption recovery are not validated. This preview has no Apple Account or Contacts Only integration.
-
-## Existing development installations
-
-Stop transfers and close the old application, then replace it with the provided `AirBridge.exe`. The runtime protocol is unchanged. Select **Check again** after plugging in the verified adapter. Keep the old executable if you want to roll back.
-
-## Reporting an adapter
-
-Open **Device details & compatibility → Copy compatibility report**. Paste it into a GitHub issue and add the brand, model and hardware revision printed on the adapter or packaging. Review the report before posting.
-
-## Source and runtime
-
-The repository includes Rust application/protocol sources, runtime orchestration, the experimental driver patch and research references. See `docs/RUNTIME.md` for prerequisites and the current packaging boundary.
+The installer preserves existing WSL distributions and received files. It refuses to overwrite an unmanaged development runtime. See the installation guide for migration and removal details.
