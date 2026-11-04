@@ -21,7 +21,10 @@ $notices = [Text.StringBuilder]::new()
 foreach ($package in $metadata.packages | Sort-Object name,version) {
     [void]$notices.AppendLine("$($package.name) $($package.version) - $($package.license)")
     $directory = Split-Path $package.manifest_path -Parent
-    $licenseFiles = @(Get-ChildItem -LiteralPath $directory -File | Where-Object { $_.Name -match '^(LICENSE|LICENCE|COPYING|NOTICE)' })
+    $licenseFiles = @(Get-ChildItem -LiteralPath $directory -File -Recurse | Where-Object {
+        $_.Name -match '^(LICENSE|LICENCE|COPYING|NOTICE)|license\.txt$|^(OFL|UFL)\.txt$' -or
+        $_.Directory.Name -match '^LICEN[CS]ES?$'
+    })
     if ($package.license_file) {
         $licenseFiles += Get-Item -LiteralPath (Join-Path $directory $package.license_file)
     }
