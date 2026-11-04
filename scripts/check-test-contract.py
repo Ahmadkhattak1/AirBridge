@@ -3,6 +3,7 @@ import subprocess
 
 REQUIRED = {
     "receiver_requires_consent_before_upload",
+    "idle_consent_expires_but_a_long_running_video_keeps_its_approval",
     "gzip_cpio_round_trip_and_rejects_traversal",
     "windows_reserved_paths_are_refused_also_on_linux",
     "gzip_checksum_and_truncation_are_not_accepted",

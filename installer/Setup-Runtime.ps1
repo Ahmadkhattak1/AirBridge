@@ -98,7 +98,12 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'RESTART_REQUIRED' }
     }
     $usbExe = Join-Path $env:ProgramFiles 'usbipd-win\usbipd.exe'
-    if (-not (Test-Path -LiteralPath $usbExe)) {
+    $usbCurrent = $false
+    if (Test-Path -LiteralPath $usbExe) {
+        $usbVersion = (& $usbExe --version | Out-String).Trim()
+        $usbCurrent = $usbVersion -match '(\d+\.\d+\.\d+)' -and [version]$Matches[1] -ge [version]'5.3.0'
+    }
+    if (-not $usbCurrent) {
         $msi = Get-Dependency $deps.usbipd
         Invoke-Elevated 'msiexec.exe' @('/i', ('"' + $msi + '"'), '/passive', '/norestart')
     }
@@ -106,10 +111,14 @@ try {
     if ($script:restartNeeded) { throw 'RESTART_REQUIRED' }
     $names = Invoke-Wsl @('--list','--quiet')
     $exists = @($names -split "`r?`n" | ForEach-Object { $_.Trim() }) -contains $DistroName
+    $ownershipPath = Join-Path $setupHome ("managed-" + $DistroName + '.txt')
     if (-not $exists) {
         $base = Get-Dependency $deps.ubuntu
         $runtimeDirectory = Join-Path $setupHome $DistroName
         Invoke-Wsl @('--import', $DistroName, $runtimeDirectory, $base, '--version', '2') | Out-Null
+        # Allow retry after an interrupted dependency download or bootstrap,
+        # while refusing to take over an unrelated development distribution.
+        Set-Content -LiteralPath $ownershipPath -Value 'AirBridge setup 0.2.0'
     }
     $kernel = Invoke-Wsl @('-d',$DistroName,'-u','root','--exec','uname','-r')
     if ($kernel -ne $deps.kernel) {
@@ -122,7 +131,10 @@ try {
     }
     if ($exists) {
         $marker = Invoke-Wsl @('-d',$DistroName,'-u','root','--exec','sh','-c','test -f /opt/airbridge/runtime-version && cat /opt/airbridge/runtime-version || true')
-        if ($marker -notlike 'AirBridge runtime *') { throw 'An unmanaged AirBridgeRuntime already exists. Setup preserved it. See the upgrade instructions before migrating a development installation.' }
+        if ($marker -notlike 'AirBridge runtime *' -and -not (Test-Path -LiteralPath $ownershipPath)) { throw 'An unmanaged AirBridgeRuntime already exists. Setup preserved it. See the upgrade instructions before migrating a development installation.' }
+        if ($marker -like 'AirBridge runtime *') {
+            Invoke-Wsl @('-d',$DistroName,'-u','root','--exec','bash','/opt/airbridge/bin/airbridge-radio','stop') | Out-Null
+        }
     }
     Invoke-Wsl @('-d',$DistroName,'-u','root','--exec','tar','-xzf',(Wsl-Path $overlay),'-C','/') | Out-Null
     Invoke-Wsl @('-d',$DistroName,'-u','root','--exec','bash','/opt/airbridge/bin/bootstrap') | Out-Null

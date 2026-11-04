@@ -10,6 +10,10 @@ The test runtime also uses the Microsoft WSL2 Linux kernel, Ubuntu packages, the
 
 `reference/opendrop` is retained only as protocol research material and is not built or shipped as part of AirBridge.
 
+The Windows installer includes resolved Rust dependency license texts in `THIRD-PARTY-LICENSES.txt`. The matching Linux driver source is distributed beside it as `AirBridge-0.2.0-driver-source.tar.xz`, including the full kernel source, configuration, symbol versions, and AirBridge patches. The Ubuntu base and Ubuntu packages are downloaded directly from Canonical during setup.
+
+The bundled Realtek firmware is byte-identical to `rtlwifi/rtl8188fufw.bin` in upstream linux-firmware commit `6569484e6b57bc1c688b383ba6719bf2e25574c4`. Its redistribution license is included in `runtime/licenses/LICENCE.rtlwifi_firmware.txt`. Regulatory database notices are in `runtime/licenses/wireless-regdb-copyright`.
+
 The optional `rtl8xxxu-cck-experiment.ko` is a modified Linux GPL-2.0 driver, separate from the MIT application. Its change is supplied in `experiments/wifi_ble/rtl8188f-cck-experiment.patch`; matching full kernel sources remain in `/opt/airbridge/kernel` in the development runtime. The independently implemented CCK waveform generator is informed by the WiBeacon paper and Bluetooth sample vectors, with references and limitations in `experiments/wifi_ble/README.md`.
 
 ## owly license

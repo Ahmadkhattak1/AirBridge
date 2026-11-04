@@ -82,12 +82,10 @@ impl ReceiverService {
         }
     }
 
-    fn expire(&mut self) {
-        if self
-            .pending
-            .as_ref()
-            .is_some_and(|p| !p.uploading && p.activity.elapsed() > Duration::from_secs(600))
-        {
+    fn expire(&mut self, now: Instant) {
+        if self.pending.as_ref().is_some_and(|p| {
+            !p.uploading && now.saturating_duration_since(p.activity) > Duration::from_secs(600)
+        }) {
             self.pending = None;
         }
     }
@@ -98,7 +96,7 @@ impl ReceiverService {
         if request.method != "POST" || request.path != "/Upload" {
             return None;
         }
-        self.expire();
+        self.expire(Instant::now());
         let pending = self.pending.as_mut()?;
         if pending.uploading || pending.offer.ask.files.is_empty() {
             return None;
@@ -145,7 +143,7 @@ impl ReceiverService {
                 ))
             }
             "/Ask" => {
-                self.expire();
+                self.expire(Instant::now());
                 let offer = Offer::decode(&request.body)?;
                 if let Some(pending) = &mut self.pending {
                     if pending.offer == offer {
@@ -280,7 +278,8 @@ mod tests {
             body: vec![],
         };
         service.begin_upload(&upload).unwrap();
-        service.pending.as_mut().unwrap().activity = Instant::now() - Duration::from_secs(3600);
+        service.expire(Instant::now() + Duration::from_secs(3600));
+        assert!(service.pending.is_some());
         assert!(
             service
                 .handle(request.clone(), |_| panic!("long upload prompted again"))
@@ -289,7 +288,8 @@ mod tests {
                 .is_empty()
         );
         service.finish_upload(false);
-        service.pending.as_mut().unwrap().activity = Instant::now() - Duration::from_secs(601);
+        service.expire(Instant::now() + Duration::from_secs(601));
+        assert!(service.pending.is_none());
         assert_eq!(service.handle(request, |_| false).unwrap().0.status, 401);
         assert!(service.begin_upload(&upload).is_none());
     }
