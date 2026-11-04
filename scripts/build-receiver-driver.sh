@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the RTL8188F AWDL injection fix against an already built WSL kernel.
+# Build the shared rtl8xxxu AWDL driver against an already built WSL kernel.
 set -euo pipefail
 source_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 kernel=${1:-/opt/airbridge/kernel}
@@ -24,6 +24,7 @@ if grep -q airbridge_cck "$module_dir/core.c"; then
     patch --batch -R -d "$build_dir" -p1 < "$source_root/experiments/wifi_ble/rtl8188f-cck-experiment.patch"
 fi
 patch --batch -d "$build_dir" -p1 < "$source_root/runtime/rtl8188f-awdl.patch"
+python3 "$source_root/scripts/test-driver-descriptors.py" "$module_dir"
 symbols=()
 for part in drivers/usb/core net/wireless net/mac80211 drivers/leds; do
     [[ ! -f "$kernel/$part/Module.symvers" ]] || symbols+=("$kernel/$part/Module.symvers")

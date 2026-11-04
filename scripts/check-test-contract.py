@@ -17,11 +17,16 @@ REQUIRED = {
     "automatic_preparation_keeps_actions_disabled_until_the_adapter_is_ready",
     "connection_updates_do_not_interrupt_a_transfer_and_a_lost_session_is_not_ready",
     "cancelled_session_cannot_replace_the_home_screen",
+    "supported_chipsets_and_oem_ids_can_replace_the_original_adapter",
+    "ambiguous_adapters_require_selection_but_one_attached_adapter_is_reused",
+    "continuous_radio_input_does_not_starve_host_acknowledgments",
+    "queue_backpressure_stops_host_reads_while_radio_keeps_receiving",
+    "advertised_ht_mask_preserves_all_receive_streams",
 }
 
 if __name__ == "__main__":
     output = subprocess.check_output(
-        ["cargo", "test", "--workspace", "--locked", "--", "--list"], text=True
+        ["cargo", "test", "--workspace", "--locked", "--all-features", "--", "--list"], text=True
     )
     found = {line.removesuffix(": test").split("::")[-1]
              for line in output.splitlines() if line.endswith(": test")}

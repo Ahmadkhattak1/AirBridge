@@ -138,9 +138,20 @@ try {
     }
     Invoke-Wsl @('-d',$DistroName,'-u','root','--exec','tar','-xzf',(Wsl-Path $overlay),'-C','/') | Out-Null
     Invoke-Wsl @('-d',$DistroName,'-u','root','--exec','bash','/opt/airbridge/bin/bootstrap') | Out-Null
+    $adapterIds = @(Import-Csv -LiteralPath (Join-Path $InstallRoot 'adapters.tsv') -Delimiter "`t" -Header usb_id,chipset,driver,firmware,tx_rate |
+        Where-Object { $_.usb_id -match '^[0-9a-f]{4}:[0-9a-f]{4}$' } | ForEach-Object { $_.usb_id })
+    if (-not $adapterIds.Count) { throw 'The adapter catalog is missing or invalid. Run Setup again.' }
     $rows = & $usbExe list
-    $row = $rows | Where-Object { $_ -match '^\S+\s+0bda:f179\s' } | Select-Object -First 1
-    if (-not $row) { throw 'Plug in the supported Realtek RTL8188FTV adapter, then run Setup again to finish USB configuration.' }
+    $connected = @()
+    foreach ($line in $rows) {
+        if ($line.Trim() -eq 'Persisted:') { break }
+        if ($line -match '^\S+\s+([0-9a-f]{4}:[0-9a-f]{4})\s' -and $Matches[1] -in $adapterIds) { $connected += $line }
+    }
+    $attached = @($connected | Where-Object { $_ -match '\sAttached\s*$' })
+    if ($attached.Count -eq 1) { $row = $attached[0] }
+    elseif ($connected.Count -eq 1) { $row = $connected[0] }
+    elseif ($connected.Count -gt 1) { throw 'More than one supported adapter is connected. Unplug the extra adapter, then run Setup again.' }
+    else { throw 'Plug in a supported Wi-Fi adapter, then run Setup again to finish USB configuration.' }
     if ($row -and $row -match 'Not shared') {
         $busId = ($row.Trim() -split '\s+')[0]
         Invoke-Elevated $usbExe @('bind','--busid',$busId)

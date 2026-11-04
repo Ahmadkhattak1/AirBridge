@@ -31,6 +31,17 @@ async fn start() -> Result<()> {
     let name = option("--name").unwrap_or_else(|| "AirBridge".into());
     let port: u16 = option("--port").unwrap_or_else(|| "8770".into()).parse()?;
     let browse = args.iter().any(|arg| arg == "--browse");
+    let channel = option("--channel")
+        .unwrap_or_else(|| "6".into())
+        .parse::<u8>()?;
+    anyhow::ensure!([6, 44, 149].contains(&channel), "unsupported AWDL channel");
+    let rx_streams = option("--rx-streams")
+        .unwrap_or_else(|| "1".into())
+        .parse::<u8>()?;
+    anyhow::ensure!(
+        (1..=2).contains(&rx_streams),
+        "unsupported receive stream count"
+    );
     let mac: MacAddr = std::fs::read_to_string(format!("/sys/class/net/{monitor}/address"))?
         .trim()
         .parse()
@@ -39,22 +50,23 @@ async fn start() -> Result<()> {
         mac,
         &name,
         RadioConstraints {
-            channel: Channel(6),
+            channel: Channel(channel),
             presence: Presence::Fixed,
         },
     );
-    // The RTL8188FTV has one HT stream. The protocol library checks the
-    // peer's advertised MCS support and falls back to the basic rate.
+    // The runtime supplies the adapter's transmit rate and receive streams.
+    // The library checks the peer's MCS support before sending HT frames.
     let rate = option("--tx-rate").unwrap_or_else(|| "mcs7".into());
     cfg.rate = TxRate::parse(&rate).context("invalid --tx-rate")?;
+    cfg.ht.rx_mcs = (1u32 << (rx_streams * 8)) - 1;
     cfg.amsdu = true;
-    // The runtime opts in for the tested RTL8188FTV receiver. Other radio
-    // setups must support hardware Block Ack before advertising acceptance.
+    // Opt in only on radio setups that supply hardware Block Ack reception.
     cfg.accept_addba = args.iter().any(|arg| arg == "--rx-ampdu");
     println!(
         "{}",
         serde_json::json!({"event":"radio-config", "tx_rate":cfg.rate.to_string(),
-        "tx_amsdu":cfg.amsdu, "rx_ampdu":cfg.accept_addba, "channel":6})
+        "tx_amsdu":cfg.amsdu, "rx_ampdu":cfg.accept_addba, "channel":channel,
+        "rx_streams":rx_streams})
     );
     let (peer_tx, mut peers) = watch::channel(Vec::new());
     let node = Native::start(&monitor, "awdl0", cfg, peer_tx)?;

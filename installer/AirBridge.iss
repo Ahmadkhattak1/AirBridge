@@ -30,6 +30,7 @@ Source: "{#PayloadDir}\runtime-manifest.json"; DestDir: "{app}"; Flags: ignoreve
 Source: "{#PayloadDir}\THIRD-PARTY-LICENSES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Setup-Runtime.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dependencies.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\runtime\adapters.tsv"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]

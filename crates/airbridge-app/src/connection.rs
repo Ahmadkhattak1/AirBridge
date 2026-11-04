@@ -128,9 +128,8 @@ pub fn attach_adapter() -> Result<(), String> {
         return Err("The AirBridge USB service could not list devices.".into());
     }
     let text = String::from_utf8_lossy(&listing.stdout);
-    let row = hardware::supported_row(&text)
-        .ok_or_else(|| "Plug in the Realtek AirBridge Wi-Fi adapter.".to_owned())?;
-    if row.to_ascii_lowercase().contains("attached") {
+    let row = hardware::supported_row(&text).map_err(str::to_owned)?;
+    if row.split_whitespace().last() == Some("Attached") {
         return Ok(());
     }
     let bus_id = row.split_whitespace().next().unwrap();

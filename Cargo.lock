@@ -2158,7 +2158,6 @@ dependencies = [
 [[package]]
 name = "owly-awdl"
 version = "0.4.1"
-source = "git+https://github.com/t4t5/owly?rev=9a676e11d011c34ea32798a2541f2b1eeb66e731#9a676e11d011c34ea32798a2541f2b1eeb66e731"
 dependencies = [
  "tokio",
  "tracing",

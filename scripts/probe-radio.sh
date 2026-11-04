@@ -3,6 +3,7 @@
 # then restore its mode and the firmware search path.
 set -euo pipefail
 runtime=/opt/airbridge
+source "$runtime/bin/adapter-profile.sh"
 duration=${1:-8}
 [[ "$duration" =~ ^[0-9]+$ && "$duration" -le 180 ]] || exit 2
 shared=/mnt/wsl/airbridge-probe
@@ -17,21 +18,15 @@ cleanup() {
 }
 trap cleanup EXIT
 mkdir -p "$shared/rtlwifi"
-cp "$runtime/firmware/rtlwifi/rtl8188fufw.bin" "$shared/rtlwifi/"
+cp -au "$runtime/firmware/rtlwifi/." "$shared/rtlwifi/"
 cp "$runtime/firmware/regulatory.db" "$runtime/firmware/regulatory.db.p7s" "$shared/"
 printf '%s' "$shared" > /sys/module/firmware_class/parameters/path
 modprobe cfg80211
 modprobe mac80211
 modprobe led-class
 grep -q '^rtl8xxxu ' /proc/modules || insmod "$runtime/modules/rtl8xxxu.ko"
-devices=()
-for usb in /sys/bus/usb/devices/*; do
-    [[ -f "$usb/idVendor" && -f "$usb/idProduct" ]] || continue
-    [[ $(cat "$usb/idVendor") == 0bda && $(cat "$usb/idProduct") == f179 ]] || continue
-    devices+=("$usb")
-done
-[[ ${#devices[@]} == 1 ]] || { echo "Expected one RTL8188FTV adapter."; exit 2; }
-usb_path=${devices[0]}
+select_adapter "$runtime/adapters.tsv" /sys/bus/usb/devices || { echo 'Attach one supported AirBridge adapter.' >&2; exit 2; }
+usb_path=$selected_usb
 usb=$(readlink -f "$usb_path")
 for usbif in "$usb_path":*; do
     [[ -d "$usbif" ]] || continue

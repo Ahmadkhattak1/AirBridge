@@ -1,0 +1,28 @@
+[package]
+name = "owly-awdl"
+description = "Sans-IO AWDL frames, synchronization, scheduling and data path"
+version = "0.4.1"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+repository = "https://github.com/t4t5/owly"
+
+[package.metadata.airbridge]
+upstream-revision = "9a676e11d011c34ea32798a2541f2b1eeb66e731"
+
+[features]
+driver = ["dep:tokio", "dep:tracing"]
+
+[dependencies]
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"], optional = true }
+tracing = { version = "0.1", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "test-util"] }
+
+[[test]]
+name = "driver"
+required-features = ["driver"]
+
+[lints.rust]
+unsafe_code = "deny"
