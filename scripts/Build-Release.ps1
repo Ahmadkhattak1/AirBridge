@@ -18,6 +18,11 @@ $hash = (Get-FileHash -LiteralPath $RuntimeArchive -Algorithm SHA256).Hash.ToLow
 $metadata = (& cargo metadata --locked --format-version 1 | ConvertFrom-Json)
 if ($LASTEXITCODE -ne 0) { throw 'Could not collect dependency licenses.' }
 $notices = [Text.StringBuilder]::new()
+$rustSysroot = (& rustc --print sysroot).Trim()
+$rustLibraryNotices = Join-Path $rustSysroot 'share\doc\rust\COPYRIGHT-library.html'
+if (-not (Test-Path -LiteralPath $rustLibraryNotices)) { throw 'The Rust toolchain library copyright notices are missing.' }
+[void]$notices.AppendLine('Rust standard library copyright and licenses')
+[void]$notices.AppendLine((Get-Content -LiteralPath $rustLibraryNotices -Raw))
 foreach ($package in $metadata.packages | Sort-Object name,version) {
     [void]$notices.AppendLine("$($package.name) $($package.version) - $($package.license)")
     $directory = Split-Path $package.manifest_path -Parent
