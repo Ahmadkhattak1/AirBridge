@@ -100,3 +100,66 @@ fn selected_local_folder_retains_spaces_and_unicode_for_runtime() {
     );
     assert!(windows_to_wsl("\\\\server\\share").is_none());
 }
+
+#[test]
+fn reconnected_upload_returns_to_transfer_without_requesting_consent() {
+    let mut app = app();
+    app.listening = true;
+    app.phase = Phase::Error;
+    event(&mut app, serde_json::json!({"event":"upload-started"}));
+    event(
+        &mut app,
+        serde_json::json!({"event":"receiving", "bytes":12345}),
+    );
+    assert_eq!(app.phase, Phase::Transfer);
+    assert!(app.pending_sender.is_none());
+    assert_eq!(app.bytes, 12345);
+}
+
+#[test]
+fn connection_updates_do_not_interrupt_a_transfer_and_a_lost_session_is_not_ready() {
+    let mut app = app();
+    app.preview = false;
+    app.listening = true;
+    app.phase = Phase::Transfer;
+    app.events_tx
+        .send(Event::Hardware(hardware::Report {
+            ready: true,
+            summary: "Ready".into(),
+            details: "Checked".into(),
+        }))
+        .unwrap();
+    app.handle_events();
+    assert_eq!(app.phase, Phase::Transfer);
+    assert!(app.hardware_ready());
+    app.events_tx
+        .send(Event::Stopped(
+            app.generation.load(Ordering::SeqCst),
+            "Adapter disconnected".into(),
+        ))
+        .unwrap();
+    app.handle_events();
+    assert_eq!(app.phase, Phase::Error);
+    assert!(!app.hardware_ready());
+}
+
+#[test]
+fn automatic_preparation_keeps_actions_disabled_until_the_adapter_is_ready() {
+    let mut app = app();
+    app.preview = false;
+    app.events_tx.send(Event::Connecting).unwrap();
+    app.handle_events();
+    assert!(!app.hardware_ready());
+    app.start();
+    assert!(!app.listening);
+    app.events_tx
+        .send(Event::Hardware(hardware::Report {
+            ready: true,
+            summary: "Ready".into(),
+            details: "Checked".into(),
+        }))
+        .unwrap();
+    app.handle_events();
+    assert!(app.hardware_ready());
+    assert!(!app.hardware_checking);
+}

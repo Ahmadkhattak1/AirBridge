@@ -1,0 +1,57 @@
+--- a/drivers/net/wireless/realtek/rtl8xxxu/core.c
++++ b/drivers/net/wireless/realtek/rtl8xxxu/core.c
+@@ -21,6 +21,11 @@
+ 
+ int rtl8xxxu_debug;
+ static bool rtl8xxxu_ht40_2g;
++/* Honor explicit monitor rates for the AirBridge AWDL link. */
++static bool airbridge_inject_rate;
++module_param(airbridge_inject_rate, bool, 0600);
++MODULE_PARM_DESC(airbridge_inject_rate, "Honor RTL8188F AWDL injection rate and retry count");
++
+ static bool rtl8xxxu_dma_aggregation;
+ static int rtl8xxxu_dma_agg_timeout = -1;
+ static int rtl8xxxu_dma_agg_pages = -1;
+@@ -5643,6 +5648,42 @@
+ 
+ 	priv->fops->fill_txdesc(hw, hdr, tx_info, tx_desc, sgi, short_preamble,
+ 				ampdu_enable, rts_rate, macid);
++
++	/* AWDL owns the injected frame's sequence, rate and no-ACK policy.
++	 * Firmware rate control has no associated station for this link.
++	 * Restrict the override to this chip and the AWDL BSSID; preserve
++	 * ordinary managed/AP traffic and the separate CCK wake experiment.
++	 */
++	if (airbridge_inject_rate && priv->rtl_chip == RTL8188F &&
++	    pktlen >= 24 && (tx_info->flags & IEEE80211_TX_CTL_INJECTED) &&
++	    (ieee80211_is_data(hdr->frame_control) || ieee80211_is_action(hdr->frame_control)) &&
++	    !memcmp(hdr->addr3, "\x00\x25\x00\xff\x94\x73", ETH_ALEN)) {
++		const struct ieee80211_tx_rate *requested = &tx_info->control.rates[0];
++		struct rtl8xxxu_txdesc40 *desc = (void *)tx_desc;
++		int rate = -1;
++		bool ht = requested->flags & IEEE80211_TX_RC_MCS;
++
++		if (ht && requested->idx >= 0 && requested->idx <= 7)
++			rate = DESC_RATE_MCS0 + requested->idx;
++		else if (!ht && tx_info->band == NL80211_BAND_2GHZ &&
++			 requested->idx >= 0 && requested->idx <= 11)
++			rate = requested->idx;
++		if (rate >= 0) {
++			desc->txdw3 |= cpu_to_le32(TXDESC40_USE_DRIVER_RATE | BIT(10));
++			desc->txdw4 &= cpu_to_le32(~(0x7fU | TXDESC40_DATA_RATE_FB_MASK |
++						TXDESC40_RETRY_LIMIT_MASK));
++			desc->txdw4 |= cpu_to_le32(rate | TXDESC40_RETRY_LIMIT_ENABLE);
++			if (!(tx_info->flags & IEEE80211_TX_CTL_NO_ACK))
++				desc->txdw4 |= cpu_to_le32(2 << TXDESC40_RETRY_LIMIT_SHIFT);
++			desc->txdw5 &= cpu_to_le32(~TXDESC40_SHORT_PREAMBLE);
++			if (ht && (requested->flags & IEEE80211_TX_RC_SHORT_GI))
++				desc->txdw5 |= cpu_to_le32(TXDESC40_SHORT_PREAMBLE);
++			desc->txdw8 &= cpu_to_le32(~TXDESC40_HW_SEQ_ENABLE);
++			/* Keep the high-volume transmit path quiet in normal use. */
++			dev_dbg(dev, "AirBridge TX rate: idx=%d ht=%d desc=%d no_ack=%d\n",
++				requested->idx, ht, rate, !!(tx_info->flags & IEEE80211_TX_CTL_NO_ACK));
++		}
++	}
+ 
+ 	rtl8xxxu_calc_tx_desc_csum(tx_desc);
+ 

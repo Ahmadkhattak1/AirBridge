@@ -48,7 +48,7 @@ dependencies = [
 
 [[package]]
 name = "airbridge-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "rfd",
@@ -57,7 +57,7 @@ dependencies = [
 
 [[package]]
 name = "airbridge-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "airbridge-core",
  "anyhow",
@@ -65,11 +65,12 @@ dependencies = [
  "rcgen",
  "rustls",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
 name = "airbridge-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "owly-airdrop",
@@ -81,7 +82,7 @@ dependencies = [
 
 [[package]]
 name = "airbridge-radio"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "owly-airdrop",

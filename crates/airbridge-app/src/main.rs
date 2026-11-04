@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 
+mod connection;
 mod design;
 mod hardware;
 #[cfg(test)]
@@ -19,6 +20,7 @@ use design::{Phase, View};
 
 #[derive(Clone, Debug)]
 enum Event {
+    Connecting,
     Hardware(hardware::Report),
     Line(u64, String),
     Stopped(u64, String),
@@ -30,6 +32,7 @@ enum Event {
 struct AirBridgeApp {
     hardware: Option<hardware::Report>,
     hardware_checking: bool,
+    shutdown: Arc<AtomicBool>,
     view: View,
     phase: Phase,
     bytes: u64,
@@ -60,7 +63,10 @@ impl AirBridgeApp {
         design::configure(&context.egui_ctx);
         let (destination, reduce_motion) = design::load_preferences();
         let mut app = Self::initial(destination, reduce_motion);
-        app.check_hardware();
+        app.preview = std::env::args().any(|arg| arg == "--preview");
+        if !app.preview {
+            app.watch_connection();
+        }
         app
     }
 
@@ -69,6 +75,7 @@ impl AirBridgeApp {
         Self {
             hardware: None,
             hardware_checking: false,
+            shutdown: Arc::new(AtomicBool::new(false)),
             view: View::Home,
             phase: Phase::Idle,
             bytes: 0,
@@ -235,6 +242,10 @@ impl AirBridgeApp {
     fn handle_events(&mut self) {
         while let Ok(event) = self.events_rx.try_recv() {
             let line = match event {
+                Event::Connecting => {
+                    self.hardware_checking = true;
+                    continue;
+                }
                 Event::Hardware(report) => {
                     self.hardware = Some(report);
                     self.hardware_checking = false;
@@ -276,6 +287,14 @@ impl AirBridgeApp {
                     self.pending_sender = None;
                     self.send_targets.clear();
                     self.phase = Phase::Error;
+                    if let Some(report) = &mut self.hardware {
+                        report.ready = false;
+                        report.summary =
+                            "Connection interrupted. AirBridge is checking your adapter.".into();
+                        report
+                            .details
+                            .push_str(&format!("\nSession stopped: {message}"));
+                    }
                     self.detail = message;
                     continue;
                 }
@@ -329,7 +348,7 @@ impl AirBridgeApp {
                     self.peer_name = value["sender"].as_str().unwrap_or("iPhone").into();
                     self.pending_sender = Some(self.peer_name.clone());
                 }
-                "accepted" => {
+                "accepted" | "upload-started" => {
                     self.pending_sender = None;
                     self.phase = Phase::Transfer;
                 }
@@ -369,6 +388,7 @@ impl AirBridgeApp {
 
 impl Drop for AirBridgeApp {
     fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::SeqCst);
         self.generation.fetch_add(1, Ordering::SeqCst);
         if self.active.load(Ordering::SeqCst) {
             // A separate helper survives this UI process exiting and completes
@@ -475,30 +495,9 @@ fn run_session(
     generation: &AtomicU64,
     tx: &Sender<Event>,
 ) -> Result<(), String> {
-    // Keep WSL alive while usbipd attaches: an idle distro can otherwise exit
-    // between attachment and radio startup and detach the USB device again.
-    struct RuntimeLease(std::process::Child);
-    impl Drop for RuntimeLease {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
-    let _lease = RuntimeLease(
-        wsl_command()
-            .args(["sleep", "120"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| format!("Could not start the radio runtime: {e}"))?,
-    );
-    let ready = bounded_output(wsl_command().arg("true"), Duration::from_secs(20))
-        .map_err(|e| format!("The radio runtime did not start: {e}"))?;
-    if !ready.status.success() {
-        return Err("The radio runtime could not start.".into());
-    }
-    attach_adapter()?;
+    // The connection worker keeps the runtime alive for the lifetime of the app.
+    // Recheck attachment here in case the device was unplugged after its last poll.
+    connection::attach_adapter()?;
     if generation.load(Ordering::SeqCst) != id {
         return Ok(());
     }
@@ -606,32 +605,6 @@ fn approve(decision: &str) {
             Duration::from_secs(5),
         );
     });
-}
-
-fn attach_adapter() -> Result<(), String> {
-    let listing = bounded_output(hidden_command("usbipd").arg("list"), Duration::from_secs(8))
-        .map_err(|_| "The AirBridge USB service is not installed.".to_owned())?;
-    let text = String::from_utf8_lossy(&listing.stdout);
-    let adapter_line = text
-        .lines()
-        .find(|line| line.to_ascii_lowercase().contains("0bda:f179"))
-        .ok_or_else(|| "Plug in the Realtek AirBridge Wi‑Fi adapter.".to_owned())?;
-    if adapter_line.to_ascii_lowercase().contains("attached") {
-        return Ok(());
-    }
-    let bus_id = adapter_line
-        .split_whitespace()
-        .next()
-        .ok_or_else(|| "Could not identify the Wi‑Fi adapter.".to_owned())?;
-    let result = bounded_output(
-        hidden_command("usbipd").args(["attach", "--wsl", "AirBridgeRuntime", "--busid", bus_id]),
-        Duration::from_secs(20),
-    )
-    .map_err(|error| format!("Could not attach the Wi‑Fi adapter: {error}"))?;
-    if !result.status.success() {
-        return Err(String::from_utf8_lossy(&result.stderr).trim().to_owned());
-    }
-    Ok(())
 }
 
 fn main() -> eframe::Result {

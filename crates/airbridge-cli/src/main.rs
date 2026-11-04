@@ -1,6 +1,6 @@
 use std::env;
 use std::fs;
-use std::io::{BufReader, Write};
+use std::io::{BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -9,8 +9,10 @@ use airbridge_core::{
     ArchiveEntry, AskRequest, FileEntry, HttpRequest, ReceiverEvent, ReceiverIdentity,
     ReceiverService, decode_ask, decode_discover_response, decode_gzip_cpio,
     encode_ask_for_transfer, encode_discover_request, encode_gzip_cpio, extension_uti,
-    read_request_buffered_progress, read_response_buffered, write_request, write_response,
+    read_request_body_to, read_request_head, read_response_buffered, write_request, write_response,
 };
+
+mod incoming;
 use anyhow::{Context, Result, bail};
 use rcgen::generate_simple_self_signed;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
@@ -486,7 +488,7 @@ fn receive(args: Vec<String>) -> Result<()> {
                     .or_insert_with(|| {
                         Arc::new(Mutex::new(ReceiverService::new(
                             identity.clone(),
-                            512 * 1024 * 1024,
+                            incoming::MAX_UPLOAD,
                         )))
                     })
                     .clone();
@@ -497,10 +499,10 @@ fn receive(args: Vec<String>) -> Result<()> {
                         serve(tcp, tls, service, &directory, yes, approval_file.as_deref())
                     {
                         let message = format!("{error:#}");
-                        if !message.contains("close_notify")
-                            && !message.contains("connection closed")
-                            && (!message.contains("Connection reset by peer")
-                                || message.contains("file transfer stopped"))
+                        if message.contains("The file transfer stopped")
+                            || (!message.contains("close_notify")
+                                && !message.contains("connection closed")
+                                && !message.contains("Connection reset by peer"))
                         {
                             println!(
                                 "{}",
@@ -530,34 +532,48 @@ fn serve(
     let connection = ServerConnection::new(config)?;
     let mut tls = StreamOwned::new(connection, tcp);
     let mut reader = BufReader::new(&mut tls);
-    let mut awaiting_upload = false;
     loop {
-        let mut progress_at = std::time::Instant::now() - std::time::Duration::from_secs(1);
-        let request =
-            match read_request_buffered_progress(&mut reader, 512 * 1024 * 1024, |bytes, total| {
-                if progress_at.elapsed() >= std::time::Duration::from_millis(500) {
-                    println!(
-                        "{}",
-                        serde_json::json!({"event":"receiving", "bytes":bytes, "total":total})
-                    );
-                    progress_at = std::time::Instant::now();
-                }
-            }) {
-                Ok(request) => request,
-                Err(airbridge_core::Error::Http(message)) if message == "connection closed" => {
-                    return Ok(());
-                }
-                Err(error) => {
-                    return Err(if awaiting_upload {
-                        anyhow::Error::from(error).context("The file transfer stopped")
-                    } else {
-                        error.into()
-                    });
-                }
-            };
+        let mut request = match read_request_head(&mut reader) {
+            Ok(request) => request,
+            Err(airbridge_core::Error::Http(message)) if message == "connection closed" => {
+                return Ok(());
+            }
+            Err(airbridge_core::Error::Io(error))
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                ) =>
+            {
+                // An idle control connection may time out while /Upload
+                // continues on a separate TLS connection for this peer.
+                return Ok(());
+            }
+            Err(error) => return Err(error.into()),
+        };
+        if request.path == "/Upload" && request.method == "POST" {
+            let response =
+                incoming::receive_upload(&mut reader, &request, service.clone(), directory)?;
+            write_response(reader.get_mut(), &response)?;
+            if response.status == 200 {
+                finish_upload_connection(reader.get_mut());
+            }
+            return Ok(());
+        }
+        let mut body = Vec::new();
+        read_request_body_to(
+            &mut reader,
+            &request,
+            8 * 1024 * 1024,
+            |_, _| {},
+            |bytes| {
+                body.extend_from_slice(bytes);
+                Ok(())
+            },
+        )?;
+        request.body = body;
         println!(
             "{}",
-            serde_json::json!({"event":"request", "path":request.path, "bytes":request.body.len(), "type":request.headers.get("content-type")})
+            serde_json::json!({"event":"request", "path":request.path, "bytes":request.body.len(), "type":request.headers.get("content-type"), "peer":reader.get_ref().sock.peer_addr()?.ip().to_string()})
         );
         let (response, events) = service.lock().expect("receiver state poisoned").handle(
             request,
@@ -604,7 +620,6 @@ fn serve(
                     ask.items.len()
                 ),
                 ReceiverEvent::FilesReceived(files) => {
-                    awaiting_upload = false;
                     let mut saved = Vec::new();
                     for file in files {
                         let target = unique_path(directory, &file.path);
@@ -629,7 +644,6 @@ fn serve(
                 ),
                 ReceiverEvent::Discovered => println!("{{\"event\":\"discovered\"}}"),
                 ReceiverEvent::Accepted(_) => {
-                    awaiting_upload = true;
                     println!("{{\"event\":\"accepted\"}}");
                 }
                 ReceiverEvent::Declined => println!("{{\"event\":\"declined\"}}"),
@@ -643,6 +657,31 @@ fn serve(
             .is_some_and(|v| v == "close")
         {
             return Ok(());
+        }
+    }
+}
+
+// The success response can cross the sender's last HTTP chunk on the wire.
+// Give it a bounded opportunity to finish so unread TCP bytes don't cause a
+// reset that masks the response. All trailing bytes are discarded.
+fn finish_upload_connection(tls: &mut StreamOwned<ServerConnection, TcpStream>) {
+    use std::time::{Duration, Instant};
+
+    tls.conn.send_close_notify();
+    if tls.flush().is_err() || tls.sock.shutdown(std::net::Shutdown::Write).is_err() {
+        return;
+    }
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut buffer = [0u8; 8192];
+    let mut drained = 0;
+    while drained < 64 * 1024 {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() || tls.sock.set_read_timeout(Some(remaining)).is_err() {
+            break;
+        }
+        match tls.sock.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(bytes) => drained += bytes,
         }
     }
 }

@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use owly_airdrop::proto::mdns::{self, Announcer, BrowseEvent, Browser, Burst, Message, Service};
-use owly_awdl::{Channel, Config, MacAddr, Presence, RadioConstraints};
+use owly_awdl::{Channel, Config, MacAddr, Presence, RadioConstraints, TxRate};
 use owly_radio::native::Native;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::{net::UdpSocket, sync::watch};
@@ -35,13 +35,26 @@ async fn start() -> Result<()> {
         .trim()
         .parse()
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let cfg = Config::new(
+    let mut cfg = Config::new(
         mac,
         &name,
         RadioConstraints {
             channel: Channel(6),
             presence: Presence::Fixed,
         },
+    );
+    // The RTL8188FTV has one HT stream. The protocol library checks the
+    // peer's advertised MCS support and falls back to the basic rate.
+    let rate = option("--tx-rate").unwrap_or_else(|| "mcs7".into());
+    cfg.rate = TxRate::parse(&rate).context("invalid --tx-rate")?;
+    cfg.amsdu = true;
+    // The runtime opts in for the tested RTL8188FTV receiver. Other radio
+    // setups must support hardware Block Ack before advertising acceptance.
+    cfg.accept_addba = args.iter().any(|arg| arg == "--rx-ampdu");
+    println!(
+        "{}",
+        serde_json::json!({"event":"radio-config", "tx_rate":cfg.rate.to_string(),
+        "tx_amsdu":cfg.amsdu, "rx_ampdu":cfg.accept_addba, "channel":6})
     );
     let (peer_tx, mut peers) = watch::channel(Vec::new());
     let node = Native::start(&monitor, "awdl0", cfg, peer_tx)?;

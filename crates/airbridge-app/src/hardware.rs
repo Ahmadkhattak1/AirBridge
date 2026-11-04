@@ -1,4 +1,4 @@
-use super::{AirBridgeApp, Event, bounded_output, hidden_command};
+use super::{AirBridgeApp, bounded_output, hidden_command};
 use std::time::Duration;
 
 #[derive(Clone, Debug)]
@@ -12,21 +12,10 @@ impl AirBridgeApp {
     pub fn hardware_ready(&self) -> bool {
         self.preview || (!self.hardware_checking && self.hardware.as_ref().is_some_and(|r| r.ready))
     }
-
-    pub fn check_hardware(&mut self) {
-        if self.hardware_checking || self.listening || self.sending {
-            return;
-        }
-        self.hardware_checking = true;
-        let tx = self.events_tx.clone();
-        std::thread::spawn(move || {
-            let _ = tx.send(Event::Hardware(probe()));
-        });
-    }
 }
 
 // Only connected rows count; usbipd retains entries for unplugged devices.
-fn supported_row(listing: &str) -> Option<&str> {
+pub fn supported_row(listing: &str) -> Option<&str> {
     listing
         .lines()
         .take_while(|line| !line.trim().eq_ignore_ascii_case("Persisted:"))
@@ -46,21 +35,6 @@ pub fn probe() -> Report {
         .unwrap_or_default();
     let row = supported_row(&listing);
     let shared = row.is_some_and(|r| !r.to_ascii_lowercase().contains("not shared"));
-    // Collect only device model IDs, not instance IDs/serial numbers or network identifiers.
-    let script = r#"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new(); $present=@(Get-PnpDevice -PresentOnly | Select-Object -ExpandProperty InstanceId); $devices=@(Get-CimInstance Win32_PnPSignedDriver | Where-Object { $_.DeviceID -in $present -and ($_.DeviceClass -eq 'NET' -or $_.DeviceID -like 'USB\VID_0BDA&PID_F179*') } | ForEach-Object { [pscustomobject]@{Name=$_.DeviceName; HardwareId=($_.DeviceID -split '\\')[1]; Driver=$_.DriverVersion; Provider=$_.DriverProviderName} }); [pscustomobject]@{Windows=[Environment]::OSVersion.Version.ToString(); Devices=$devices} | ConvertTo-Json -Depth 4 -Compress"#;
-    let inventory = bounded_output(
-        hidden_command("powershell.exe").args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            script,
-        ]),
-        Duration::from_secs(15),
-    );
-    let inventory = match inventory {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_owned(),
-        _ => "Device inventory unavailable. Try checking again.".into(),
-    };
     let wsl = bounded_output(
         hidden_command("wsl.exe").args(["--list", "--quiet"]),
         Duration::from_secs(8),
@@ -88,13 +62,13 @@ pub fn probe() -> Report {
     } else if !shared {
         "Supported adapter · USB sharing setup required"
     } else {
-        "Supported adapter · Realtek RTL8188FTV"
+        "Adapter setup available"
     };
     Report {
         ready: usb_ok && row.is_some() && runtime && shared,
         summary: summary.into(),
         details: format!(
-            "AirBridge {} compatibility report\nStatus: {summary}\nVerified USB ID: 0bda:f179 (RTL8188FTV)\nUSB service available: {usb_ok}\nMatching adapter connected: {}\nUSB shared: {shared}\nRuntime registered: {runtime}\n{inventory}\n\nPlease add the adapter's brand/model and hardware revision from its label when reporting this on GitHub. No files, IP addresses, MAC addresses or serial numbers are collected. Driver versions alone do not establish AirDrop compatibility.",
+            "AirBridge {} compatibility report\nStatus: {summary}\nVerified USB ID: 0bda:f179 (RTL8188FTV)\nUSB service available: {usb_ok}\nMatching adapter connected: {}\nUSB shared: {shared}\nRuntime registered: {runtime}",
             env!("CARGO_PKG_VERSION"),
             row.is_some()
         ),

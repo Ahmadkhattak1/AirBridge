@@ -20,6 +20,8 @@ The tested driver build uses Microsoft WSL2 kernel tag `linux-msft-wsl-6.18.33.2
 
 On an already provisioned Linux runtime, `scripts/install-runtime.sh` builds and installs the Rust services and orchestration. It is an update script, not a prerequisite installer. It deliberately refuses to update during an active session.
 
-The startup UI checks connected hardware, USB sharing and runtime registration. Registration alone does not verify every runtime file or guarantee successful transfer; runtime startup reports subsequent errors.
+For faster reception on the RTL8188FTV, stop AirBridge and run `bash scripts/build-receiver-driver.sh` as root inside the runtime. It builds the driver in a temporary directory using the matching, already built kernel tree in `/opt/airbridge/kernel` and installs `/opt/airbridge/modules/rtl8xxxu-awdl.ko`. Preparation selects that module when present and reuses it between receive sessions. `AIRBRIDGE_INJECT_RATE=0` selects the stock driver for comparison.
+
+The app prepares the adapter on startup and keeps the runtime alive while open. Between sessions it checks the connection every five seconds, automatically attaches the adapter, and runs `airbridge-radio prepare` to verify the driver and interface. Preparation uses the same lock as a radio session. The connection menu reports failures and provides copyable diagnostics. A hardware power-on failure may still require a physical unplug/replug.
 
 For a Windows source build, use a current Rust toolchain with Visual Studio C++ build tools/Windows SDK and `cargo build --release -p airbridge-app`. The repository's `Build.ps1` is an alternative used on the development machine, requiring its local `.tools/xwin-sdk` layout and Zig.

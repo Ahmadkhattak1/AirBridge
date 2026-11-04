@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
+use std::ops::ControlFlow;
 
 use crate::{Error, Result};
 
@@ -54,53 +55,97 @@ fn body_progress<R: BufRead>(
     limit: usize,
     progress: &mut impl FnMut(usize, Option<usize>),
 ) -> Result<Vec<u8>> {
-    if headers
+    let mut out = Vec::new();
+    copy_body(reader, headers, limit, progress, &mut |bytes| {
+        out.extend_from_slice(bytes);
+        Ok(ControlFlow::Continue(()))
+    })?;
+    Ok(out)
+}
+
+fn copy_body<R: BufRead>(
+    reader: &mut R,
+    fields: &BTreeMap<String, String>,
+    limit: usize,
+    progress: &mut impl FnMut(usize, Option<usize>),
+    sink: &mut impl FnMut(&[u8]) -> Result<ControlFlow<()>>,
+) -> Result<()> {
+    let chunked = fields
         .get("transfer-encoding")
-        .is_some_and(|v| v.eq_ignore_ascii_case("chunked"))
-    {
-        let mut out = Vec::new();
-        loop {
+        .is_some_and(|v| v.eq_ignore_ascii_case("chunked"));
+    let total = if chunked {
+        None
+    } else {
+        Some(
+            fields
+                .get("content-length")
+                .map(|v| v.parse::<usize>())
+                .transpose()
+                .map_err(|_| Error::Http("invalid content length".into()))?
+                .unwrap_or(0),
+        )
+    };
+    let mut received = 0usize;
+    loop {
+        let mut remaining = if let Some(length) = total {
+            length
+        } else {
             let mut size = String::new();
-            reader.read_line(&mut size)?;
-            let size = usize::from_str_radix(size.trim().split(';').next().unwrap_or(""), 16)
-                .map_err(|_| Error::Http("invalid chunk size".into()))?;
+            let n = reader.take(1026).read_line(&mut size)?;
+            if n == 0 {
+                return Err(Error::Http(format!(
+                    "connection ended before the final HTTP chunk after {received} bytes"
+                )));
+            }
+            if !size.ends_with("\r\n") || size.len() > 1024 {
+                return Err(Error::Http(format!(
+                    "incomplete or oversized chunk header after {received} bytes"
+                )));
+            }
+            let digits = size.trim().split(';').next().unwrap_or("").trim_end();
+            if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err(Error::Http(format!(
+                    "invalid chunk size after {received} bytes (header {:?})",
+                    size.chars().take(64).collect::<String>()
+                )));
+            }
+            let size = usize::from_str_radix(digits, 16)
+                .map_err(|_| Error::Http("chunk size exceeds supported range".into()))?;
             if size == 0 {
-                let mut tail = String::new();
-                reader.read_line(&mut tail)?;
-                break;
+                headers(reader)?; // Consume all trailers before the next request.
+                return Ok(());
             }
-            if out.len().saturating_add(size) > limit {
-                return Err(Error::Http("request body too large".into()));
+            size
+        };
+        if remaining > limit - received {
+            return Err(Error::Http("request body too large".into()));
+        }
+        while remaining > 0 {
+            let bytes = reader.fill_buf()?;
+            if bytes.is_empty() {
+                return Err(Error::Http(
+                    "connection ended during the request body".into(),
+                ));
             }
-            let start = out.len();
-            out.resize(start + size, 0);
-            for (i, part) in out[start..].chunks_mut(64 * 1024).enumerate() {
-                reader.read_exact(part)?;
-                progress(start + i * 64 * 1024 + part.len(), None);
-            }
-            let mut crlf = [0; 2];
-            reader.read_exact(&mut crlf)?;
-            if crlf != *b"\r\n" {
-                return Err(Error::Http("invalid chunk terminator".into()));
+            let n = remaining.min(bytes.len()).min(64 * 1024);
+            let action = sink(&bytes[..n])?;
+            reader.consume(n);
+            received += n;
+            remaining -= n;
+            progress(received, total);
+            if action.is_break() {
+                return Ok(());
             }
         }
-        return Ok(out);
+        if !chunked {
+            return Ok(());
+        }
+        let mut crlf = [0; 2];
+        reader.read_exact(&mut crlf)?;
+        if crlf != *b"\r\n" {
+            return Err(Error::Http("invalid chunk terminator".into()));
+        }
     }
-    let size = headers
-        .get("content-length")
-        .map(|v| v.parse::<usize>())
-        .transpose()
-        .map_err(|_| Error::Http("invalid content length".into()))?
-        .unwrap_or(0);
-    if size > limit {
-        return Err(Error::Http("request body too large".into()));
-    }
-    let mut out = vec![0; size];
-    for (i, part) in out.chunks_mut(64 * 1024).enumerate() {
-        reader.read_exact(part)?;
-        progress(i * 64 * 1024 + part.len(), Some(size));
-    }
-    Ok(out)
 }
 
 pub fn read_request<R: Read>(input: R, limit: usize) -> Result<HttpRequest> {
@@ -127,6 +172,34 @@ pub fn read_request_buffered_progress<S: Read + Write>(
     limit: usize,
     mut progress: impl FnMut(usize, Option<usize>),
 ) -> Result<HttpRequest> {
+    let mut request = read_request_head(reader)?;
+    let limit = if request.path == "/Upload" {
+        limit
+    } else {
+        limit.min(8 * 1024 * 1024)
+    };
+    let mut body = Vec::new();
+    read_request_body_to(
+        reader,
+        &request,
+        limit,
+        |bytes, total| {
+            if request.path == "/Upload" {
+                progress(bytes, total);
+            }
+        },
+        |bytes| {
+            body.extend_from_slice(bytes);
+            Ok(())
+        },
+    )?;
+    request.body = body;
+    Ok(request)
+}
+
+/// Read headers separately so the receiver can authorize an upload before
+/// acknowledging 100-continue or reading any file bytes.
+pub fn read_request_head<R: BufRead>(reader: &mut R) -> Result<HttpRequest> {
     let mut first = String::new();
     reader.read_line(&mut first)?;
     if first.is_empty() {
@@ -134,7 +207,39 @@ pub fn read_request_buffered_progress<S: Read + Write>(
     }
     let (method, path) = request_line(&first)?;
     let headers = headers(reader)?;
-    if headers
+    Ok(HttpRequest {
+        method,
+        path,
+        headers,
+        body: Vec::new(),
+    })
+}
+
+/// Copy a framed body in bounded pieces, including arbitrarily large HTTP chunks.
+pub fn read_request_body_to<S: Read + Write>(
+    reader: &mut BufReader<S>,
+    request: &HttpRequest,
+    limit: usize,
+    progress: impl FnMut(usize, Option<usize>),
+    mut sink: impl FnMut(&[u8]) -> Result<()>,
+) -> Result<()> {
+    read_request_body_until(reader, request, limit, progress, |bytes| {
+        sink(bytes)?;
+        Ok(ControlFlow::Continue(()))
+    })
+}
+
+/// Read a framed body until the sink signals completion. On early completion
+/// the caller must close the connection after responding.
+pub fn read_request_body_until<S: Read + Write>(
+    reader: &mut BufReader<S>,
+    request: &HttpRequest,
+    limit: usize,
+    mut progress: impl FnMut(usize, Option<usize>),
+    mut sink: impl FnMut(&[u8]) -> Result<ControlFlow<()>>,
+) -> Result<()> {
+    if request
+        .headers
         .get("expect")
         .is_some_and(|value| value.eq_ignore_ascii_case("100-continue"))
     {
@@ -143,17 +248,7 @@ pub fn read_request_buffered_progress<S: Read + Write>(
             .write_all(b"HTTP/1.1 100 Continue\r\n\r\n")?;
         reader.get_mut().flush()?;
     }
-    let body = if path == "/Upload" {
-        body_progress(reader, &headers, limit, &mut progress)?
-    } else {
-        body(reader, &headers, limit.min(8 * 1024 * 1024))?
-    };
-    Ok(HttpRequest {
-        method,
-        path,
-        headers,
-        body,
-    })
+    copy_body(reader, &request.headers, limit, &mut progress, &mut sink)
 }
 
 fn read_request_parts<R: BufRead, F: FnOnce() -> Result<()>>(
@@ -230,30 +325,34 @@ pub fn read_response_buffered<R: BufRead>(reader: &mut R, limit: usize) -> Resul
 }
 
 pub fn write_request<W: Write>(mut out: W, request: &HttpRequest) -> Result<()> {
-    write!(out, "{} {} HTTP/1.1\r\n", request.method, request.path)?;
+    let mut head = Vec::new();
+    write!(head, "{} {} HTTP/1.1\r\n", request.method, request.path)?;
     for (k, v) in &request.headers {
-        write!(out, "{k}: {v}\r\n")?;
+        write!(head, "{k}: {v}\r\n")?;
     }
     if !request.headers.contains_key("content-length")
         && !request.headers.contains_key("transfer-encoding")
     {
-        write!(out, "Content-Length: {}\r\n", request.body.len())?;
+        write!(head, "Content-Length: {}\r\n", request.body.len())?;
     }
-    write!(out, "\r\n")?;
+    write!(head, "\r\n")?;
+    out.write_all(&head)?;
     out.write_all(&request.body)?;
     out.flush()?;
     Ok(())
 }
 
 pub fn write_response<W: Write>(mut out: W, response: &HttpResponse) -> Result<()> {
-    write!(out, "HTTP/1.1 {} {}\r\n", response.status, response.reason)?;
+    let mut head = Vec::new();
+    write!(head, "HTTP/1.1 {} {}\r\n", response.status, response.reason)?;
     for (k, v) in &response.headers {
-        write!(out, "{k}: {v}\r\n")?;
+        write!(head, "{k}: {v}\r\n")?;
     }
     if !response.headers.contains_key("content-length") {
-        write!(out, "Content-Length: {}\r\n", response.body.len())?;
+        write!(head, "Content-Length: {}\r\n", response.body.len())?;
     }
-    write!(out, "\r\n")?;
+    write!(head, "\r\n")?;
+    out.write_all(&head)?;
     out.write_all(&response.body)?;
     out.flush()?;
     Ok(())
