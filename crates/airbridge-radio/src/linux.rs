@@ -85,6 +85,12 @@ async fn start() -> Result<()> {
     };
     let group = SocketAddrV6::new(mdns::MDNS_GROUP, mdns::MDNS_PORT, 0, scope);
     let announcement = service.announcement();
+    let quic = args.iter().any(|arg| arg == "--http3").then(|| {
+        // The captured Application Service uses a UUID-shaped instance and
+        // an empty TXT record, independently of the legacy AirDrop instance.
+        let instance = format!("00000000-0000-4000-8000-{}", service.instance);
+        crate::quic_discovery::QuicService::new(&service, &instance)
+    });
     let mut announcer = Announcer::new(
         Some(Burst {
             count: 64,
@@ -140,6 +146,9 @@ async fn start() -> Result<()> {
                     if announcer.on_timer(Instant::now()) {
                         if port != 0 {
                             socket.send_to(&announcement, group).await.context("announce AirBridge")?;
+                            if let Some(quic) = &quic {
+                                socket.send_to(&quic.announcement(false), group).await?;
+                            }
                         }
                         if browse {
                             let query = Message { questions: vec![mdns::Question {
@@ -163,6 +172,10 @@ async fn start() -> Result<()> {
                         report_browser(&mut browser, mac.link_local(), scope);
                     }
                     if port == 0 { continue; }
+                    if let Some(quic) = &quic
+                        && let Some(reply) = quic.answer(&query, from.port() != mdns::MDNS_PORT) {
+                        socket.send_to(&reply.message, if reply.unicast {from} else {group}).await?;
+                    }
                     if let Some(reply) = service.answer(&query, from.port() != mdns::MDNS_PORT) {
                         println!("{}", serde_json::json!({"event":"discovery-query", "peer":from.ip().to_string()}));
                         socket.send_to(&reply.message, if reply.unicast {from} else {group}).await?;
@@ -174,6 +187,9 @@ async fn start() -> Result<()> {
     }.await;
     if port != 0 {
         let _ = socket.send_to(&service.goodbye(), group).await;
+        if let Some(quic) = &quic {
+            let _ = socket.send_to(&quic.announcement(true), group).await;
+        }
     }
     node.stop();
     result

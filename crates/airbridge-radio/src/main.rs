@@ -11,3 +11,5 @@ fn main() {
     eprintln!("The AirBridge radio runs inside AirBridgeRuntime.");
     std::process::exit(1);
 }
+#[cfg(target_os = "linux")]
+mod quic_discovery;

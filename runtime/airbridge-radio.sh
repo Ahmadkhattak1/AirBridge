@@ -233,6 +233,11 @@ rm -f "$run/radio.ready" "$run/approval"
 port=8770
 [[ "$mode" != send ]] || port=0
 node_args=()
+transport_args=()
+if [[ "$mode" == receive && ${AIRBRIDGE_HTTP3:-1} == 1 ]]; then
+    transport_args+=(--http3)
+    node_args+=(--http3)
+fi
 node_args+=(--tx-rate "${AIRBRIDGE_TX_RATE:-$tx_rate}")
 node_args+=(--channel "$channel" --rx-streams "$rx_streams")
 if [[ "$mode" == receive && ${AIRBRIDGE_RX_REPLY:-1} == 1 ]]; then
@@ -283,7 +288,7 @@ fi
 
 address=$(ip -6 -o addr show dev awdl0 scope link | awk '{print $4}' | cut -d/ -f1)
 ifindex=$(cat /sys/class/net/awdl0/ifindex)
-"$root/bin/airbridge" receive --listen "[$address%$ifindex]:8770" --dir "$destination" --name "$name" --approval-file "$run/approval" >"$logs/receiver.log" 2>&1 &
+"$root/bin/airbridge" receive --listen "[$address%$ifindex]:8770" --dir "$destination" --name "$name" --approval-file "$run/approval" "${transport_args[@]}" >"$logs/receiver.log" 2>&1 &
 receiver_pid=$!
 for _ in {1..50}; do
     kill -0 "$receiver_pid" 2>/dev/null || { cat "$logs/receiver.log" >&2; exit 5; }
