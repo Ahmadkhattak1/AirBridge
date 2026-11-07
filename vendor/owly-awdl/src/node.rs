@@ -112,6 +112,9 @@ pub struct Config {
     pub no_ack: bool,
     /// Accept a peer's Block Ack session (AWDL-15).
     pub accept_addba: bool,
+    /// Receive A-MSDUs inside a Block Ack session. Enable only when the
+    /// backend can capture the full advertised A-MSDU plus MAC headers.
+    pub rx_amsdu: bool,
     /// Permit one immediate TCP ACK after receiving data on a fixed radio.
     pub rx_reply: bool,
     /// Send unicast packets to one peer as A-MSDUs, up to the peer's limit.
@@ -139,6 +142,7 @@ impl Config {
             ht: HtCapabilities::ONE_STREAM,
             no_ack,
             accept_addba: false,
+            rx_amsdu: false,
             rx_reply: false,
             amsdu: false,
             max_frame: 2304,
@@ -383,8 +387,15 @@ impl Node {
                 && self.peers.contains_key(&header.src) =>
             {
                 let seq = self.next_seq();
-                let bytes =
-                    frame::addba_response(self.cfg.addr, header.src, seq, token, params, timeout);
+                let bytes = frame::addba_response(
+                    self.cfg.addr,
+                    header.src,
+                    seq,
+                    token,
+                    params,
+                    timeout,
+                    self.cfg.rx_amsdu,
+                );
                 out.push(Action::Transmit {
                     at: now,
                     frame: Frame {

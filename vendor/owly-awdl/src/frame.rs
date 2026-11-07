@@ -348,8 +348,8 @@ pub fn amsdu_frame(
 }
 
 /// AWDL-15: an ADDBA response accepting a request, as legacy patch
-/// `owl-10` answers it: immediate Block Ack, the requested TID, no A-MSDU
-/// inside A-MPDUs, a window of at most 64.
+/// `owl-10` answers it: immediate Block Ack, the requested TID and a window
+/// of at most 64. A-MSDUs require both the peer's request and backend support.
 pub fn addba_response(
     src: MacAddr,
     dst: MacAddr,
@@ -357,12 +357,14 @@ pub fn addba_response(
     token: u8,
     requested: u16,
     timeout: u16,
+    rx_amsdu: bool,
 ) -> Vec<u8> {
     let mut window = (requested >> 6) & 0x3ff;
     if window == 0 || window > 64 {
         window = 64;
     }
-    let params = (requested & 0x003c) | 0x0002 | (window << 6);
+    let amsdu = if rx_amsdu { requested & 1 } else { 0 };
+    let params = (requested & 0x003c) | 0x0002 | amsdu | (window << 6);
     let mut out = Vec::with_capacity(HEADER_LEN + 9);
     put_header(&mut out, fc::ACTION, dst, src, seq);
     out.u8(CATEGORY_BLOCK_ACK);
@@ -568,11 +570,51 @@ mod tests {
             panic!("not ADDBA");
         };
         assert_eq!((header.src, token, timeout), (B, 9, 0));
-        let resp = addba_response(A, B, 4, token, params, timeout);
+        let resp = addba_response(A, B, 4, token, params, timeout, false);
         let body = &resp[HEADER_LEN..];
         assert_eq!(&body[..5], &[3, 1, 9, 0, 0]);
         let p = u16::from_le_bytes([body[5], body[6]]);
         assert_eq!(((p >> 2) & 0xf, p & 0x3, p >> 6), (5, 0x2, 64));
         assert_eq!(&resp[4..10], &B.0);
+    }
+
+    #[test]
+    fn full_size_grouped_frames_preserve_every_payload() {
+        for count in [2, 5] {
+            let packets: Vec<Vec<u8>> = (0..count).map(|i| vec![i as u8; 1500]).collect();
+            let refs: Vec<&[u8]> = packets.iter().map(Vec::as_slice).collect();
+            let bytes = amsdu_frame(B, A, 1, 10, &refs);
+            assert!(bytes.len() > 2352);
+            assert!(bytes.len() < 8192);
+            let Received::Data {
+                header,
+                amsdu,
+                body,
+            } = parse(&bytes).unwrap()
+            else {
+                panic!("not data");
+            };
+            let decoded = msdus(&header, amsdu, body).unwrap();
+            assert_eq!(decoded.len(), count);
+            for (packet, original) in decoded.iter().zip(&packets) {
+                assert_eq!((packet.src, packet.dst), (B, A));
+                assert_eq!(packet.payload, original);
+            }
+        }
+    }
+
+    #[test]
+    fn grouped_block_ack_requires_both_peer_and_backend_support() {
+        for requested_amsdu in [false, true] {
+            for supported in [false, true] {
+                let requested = (32 << 6) | (7 << 2) | 2 | u16::from(requested_amsdu);
+                let resp = addba_response(A, B, 4, 9, requested, 123, supported);
+                let body = &resp[HEADER_LEN..];
+                let params = u16::from_le_bytes([body[5], body[6]]);
+                assert_eq!(params & 1 != 0, requested_amsdu && supported);
+                assert_eq!((params >> 6, (params >> 2) & 15, params & 2), (32, 7, 2));
+                assert_eq!(u16::from_le_bytes([body[7], body[8]]), 123);
+            }
+        }
     }
 }

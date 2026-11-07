@@ -119,7 +119,7 @@ modprobe cfg80211
 modprobe mac80211
 modprobe led-class
 if [[ "$mode" == send || ${AIRBRIDGE_INJECT_RATE:-1} == 1 ]] && [[ -f "$root/modules/rtl8xxxu-awdl.ko" ]]; then
-    if [[ ! -f /sys/module/rtl8xxxu/parameters/airbridge_cck || ! -f /sys/module/rtl8xxxu/parameters/airbridge_inject_rate ]]; then
+    if [[ ! -f /sys/module/rtl8xxxu/parameters/airbridge_cck || ! -f /sys/module/rtl8xxxu/parameters/airbridge_inject_rate || ! -f /sys/module/rtl8xxxu/parameters/airbridge_rx_amsdu ]]; then
         if grep -q '^rtl8xxxu ' /proc/modules; then rmmod rtl8xxxu; fi
         insmod "$root/modules/rtl8xxxu-awdl.ko" airbridge_inject_rate="${AIRBRIDGE_INJECT_RATE:-1}"
     fi
@@ -248,6 +248,13 @@ if [[ "$mode" == receive && ${AIRBRIDGE_RX_REPLY:-1} == 1 ]]; then
 fi
 if [[ "$mode" == receive && ${AIRBRIDGE_RX_AMPDU:-1} == 1 ]]; then
     node_args+=(--rx-ampdu)
+    # Only promise nested A-MSDUs when the loaded driver can receive their
+    # full size. Older runtime modules retain the conservative response.
+    if [[ ${AIRBRIDGE_RX_AMSDU:-1} == 1 && ${AIRBRIDGE_INJECT_RATE:-1} == 1 &&
+          -f /sys/module/rtl8xxxu/parameters/airbridge_rx_amsdu ]] &&
+       [[ $(cat /sys/module/rtl8xxxu/parameters/airbridge_rx_amsdu) == Y ]]; then
+        node_args+=(--rx-amsdu)
+    fi
 fi
 [[ "$mode" == receive ]] || node_args+=(--browse)
 RUST_LOG=info "$root/bin/airbridge-radio-node" --monitor abmon0 --name "$name" --port "$port" --ready-file "$run/radio.ready" "${node_args[@]}" >"$logs/radio.log" 2>&1 &

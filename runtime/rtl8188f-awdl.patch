@@ -1,6 +1,6 @@
 --- a/drivers/net/wireless/realtek/rtl8xxxu/core.c
 +++ b/drivers/net/wireless/realtek/rtl8xxxu/core.c
-@@ -21,6 +21,13 @@
+@@ -21,6 +21,16 @@
  
  int rtl8xxxu_debug;
  static bool rtl8xxxu_ht40_2g;
@@ -8,17 +8,27 @@
 +static bool airbridge_inject_rate;
 +module_param(airbridge_inject_rate, bool, 0600);
 +MODULE_PARM_DESC(airbridge_inject_rate, "Honor AWDL injection rates on rtl8xxxu radios");
++static bool airbridge_rx_amsdu = true;
++module_param(airbridge_rx_amsdu, bool, 0444);
++MODULE_PARM_DESC(airbridge_rx_amsdu, "Capture full HT A-MSDUs for the AirBridge radio");
 +static bool airbridge_cck;
 +module_param(airbridge_cck, bool, 0600);
 +MODULE_PARM_DESC(airbridge_cck, "Enable marked AirBridge 11Mbps CCK wake frames");
  static bool rtl8xxxu_dma_aggregation;
  static int rtl8xxxu_dma_agg_timeout = -1;
  static int rtl8xxxu_dma_agg_pages = -1;
-@@ -5512,6 +5519,82 @@
+@@ -5512,6 +5522,89 @@
  	tx_desc->txdw7 |= cpu_to_le16(TXDESC_ANTENNA_SELECT_C >> 16);
  }
  
 +
++static int rtl8xxxu_airbridge_rx_buffer_size(int size)
++{
++	/* 7935-byte A-MSDU plus MAC/FCS, RX descriptor and PHY metadata. */
++	if (airbridge_inject_rate && airbridge_rx_amsdu && size < 8192)
++		return 8192;
++	return size;
++}
 +/*
 + * The 32-byte v1/v3 and 40-byte v2 formats encode rates differently.
 + * Keep the firmware from overriding the rate/sequence of our injected frames.
@@ -97,7 +107,7 @@
  static void rtl8xxxu_tx(struct ieee80211_hw *hw,
  			struct ieee80211_tx_control *control,
  			struct sk_buff *skb)
-@@ -5643,6 +5726,8 @@
+@@ -5643,6 +5736,8 @@
  
  	priv->fops->fill_txdesc(hw, hdr, tx_info, tx_desc, sgi, short_preamble,
  				ampdu_enable, rts_rate, macid);
@@ -106,3 +116,14 @@
  
  	rtl8xxxu_calc_tx_desc_csum(tx_desc);
  
+@@ -6629,6 +6724,10 @@
+ 		skb_size = IEEE80211_MAX_FRAME_LEN + rx_desc_sz;
+ 	}
+ 
++	/* Preserve larger USB aggregation buffers; fix the legacy 2352-byte
++	 * allocation only for the dedicated AWDL receive path. */
++	skb_size = rtl8xxxu_airbridge_rx_buffer_size(skb_size);
++
+ 	skb = __netdev_alloc_skb(NULL, skb_size, GFP_KERNEL);
+ 	if (!skb)
+ 		return -ENOMEM;

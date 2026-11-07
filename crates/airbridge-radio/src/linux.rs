@@ -114,10 +114,11 @@ async fn start() -> Result<()> {
     cfg.rx_reply = args.iter().any(|arg| arg == "--rx-reply");
     // Opt in only on radio setups that supply hardware Block Ack reception.
     cfg.accept_addba = args.iter().any(|arg| arg == "--rx-ampdu");
+    cfg.rx_amsdu = args.iter().any(|arg| arg == "--rx-amsdu");
     println!(
         "{}",
         serde_json::json!({"event":"radio-config", "tx_rate":cfg.rate.to_string(),
-        "tx_amsdu":cfg.amsdu, "rx_ampdu":cfg.accept_addba, "channel":channel,
+        "tx_amsdu":cfg.amsdu, "rx_ampdu":cfg.accept_addba, "rx_amsdu":cfg.rx_amsdu, "channel":channel,
         "rx_ht_caps":format!("{:04x}", cfg.ht.capabilities),
         "rx_ampdu_params":format!("{:02x}", cfg.ht.ampdu_params),
         "rx_mcs":format!("{:08x}", cfg.ht.rx_mcs),

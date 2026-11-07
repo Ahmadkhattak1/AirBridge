@@ -449,12 +449,14 @@ impl<A: Air, N: Netif> Driver<A, N> {
             if let Some(sequence) = &peer.sequence {
                 let channel = self.node.config().radio.channel.0;
                 println!(
-                    "{{\"event\":\"radio-schedule\",\"peer\":\"{}\",\"channel\":{},\"shared_slots\":{},\"total_slots\":{},\"peer_primary_channel\":{}}}",
+                    "{{\"event\":\"radio-schedule\",\"peer\":\"{}\",\"channel\":{},\"shared_slots\":{},\"total_slots\":{},\"peer_primary_channel\":{},\"sync_master\":\"{}\",\"master_metric\":{}}}",
                     peer.mac,
                     channel,
                     sequence.count(channel),
                     crate::channel::SLOTS,
                     sequence.dominant(channel),
+                    self.node.election().master,
+                    self.node.election().master_metric,
                 );
             }
         }

@@ -51,8 +51,10 @@ The receiver processed 165,289,168 archive-body bytes in 113.339 seconds:
 TCP runs. The radio still reported five shared channel-6 slots out of 16,
 with the phone's primary channel 149. A 19.155-second header sample contained
 21,846 large inbound frames, including 1,555 with the retry bit set (7.12%).
-The observed MCS frames still used long GI, despite the corrected short-GI
-advertisement. No radio queue overflows or drops were reported. These are
+Radiotap reported long GI, but subsequent raw USB descriptor measurements
+found short GI in Mac transfers that ordinary capture did not report correctly.
+The earlier capture therefore does not establish the iPhone's guard interval.
+No radio queue overflows or drops were reported. These are
 measurements of the remaining speed problem, not a claim it is resolved.
 
 ## HTTP/3 status

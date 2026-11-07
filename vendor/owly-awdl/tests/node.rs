@@ -149,6 +149,9 @@ fn observed_tcp_data_allows_only_one_timely_ack_for_that_peer_and_flow() {
     ack.data[53] = 0x10;
     for (enabled, delay, flags, port, expected) in [
         (true, 200, 0x10, 3, true),
+        (true, 200, 0x50, 3, true),
+        (true, 200, 0x90, 3, true),
+        (true, 200, 0xd0, 3, true),
         (false, 200, 0x10, 3, false),
         (true, TU + 1, 0x10, 3, false),
         (true, 200, 0x02, 3, false),

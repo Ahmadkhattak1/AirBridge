@@ -25,6 +25,9 @@ REQUIRED = {
     "receiver_declares_original_heif_and_hevc_support",
     "observed_tcp_data_allows_only_one_timely_ack_for_that_peer_and_flow",
     "unrelated_queued_packets_do_not_block_an_observed_ack",
+    "ecn_does_not_disable_observed_presence_acknowledgments",
+    "grouped_block_ack_requires_both_peer_and_backend_support",
+    "full_size_grouped_frames_preserve_every_payload",
     "http3_streams_require_consent_preserve_files_and_finish_without_sender_fin",
 }
 

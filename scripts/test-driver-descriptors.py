@@ -8,7 +8,7 @@ import tempfile
 
 
 def function(source, name):
-    start = source.index("static void " + name + "(")
+    start = re.search(r"static (?:void|int) " + re.escape(name) + r"\(", source).start()
     end = source.index("\n}\n", start) + 3
     return source[start:end]
 
@@ -55,9 +55,20 @@ static bool ieee80211_is_action(u16 fc) { return (fc & 0xfc) == 0xd0; }
 struct rtl8xxxu_fileops { int tx_desc_size; };
 struct rtl8xxxu_priv { int tx_paths; struct rtl8xxxu_fileops *fops; };
 static bool airbridge_inject_rate = true, airbridge_cck;
+static bool airbridge_rx_amsdu = true;
 '''
     cases = r'''
 int main(void) {
+    /* Full 7935-byte A-MSDU plus radio headers fits; existing USB batches
+     * stay intact. The opt-out and ordinary driver behavior are preserved. */
+    assert(rtl8xxxu_airbridge_rx_buffer_size(2352 + 24) >= 7935 + 26 + 4 + 24 + 32);
+    assert(rtl8xxxu_airbridge_rx_buffer_size(32768) == 32768);
+    airbridge_rx_amsdu = false;
+    assert(rtl8xxxu_airbridge_rx_buffer_size(2376) == 2376);
+    airbridge_rx_amsdu = true;
+    airbridge_inject_rate = false;
+    assert(rtl8xxxu_airbridge_rx_buffer_size(2376) == 2376);
+    airbridge_inject_rate = true;
     struct rtl8xxxu_fileops fops = {0};
     struct rtl8xxxu_priv priv = {1, &fops};
     struct { struct ieee80211_hdr hdr; u8 body[8]; } frame = {0};
@@ -127,6 +138,7 @@ int main(void) {
 }
 '''
     code = "\n".join((harness, defines, descriptors,
+                       function(source, "rtl8xxxu_airbridge_rx_buffer_size"),
                        function(source, "rtl8xxxu_airbridge_set_rate"),
                        function(source, "rtl8xxxu_airbridge_txdesc"), cases))
     with tempfile.TemporaryDirectory(prefix="airbridge-descriptor-test-") as tmp:

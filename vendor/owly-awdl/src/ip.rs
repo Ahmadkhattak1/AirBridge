@@ -84,12 +84,13 @@ impl Ipv6Packet {
 
     pub(crate) fn expected_ack_ports(&self) -> Option<[u8; 4]> {
         let (tcp, header) = self.direct_tcp()?;
-        (tcp[13] & !0x08 == 0x10 && header < tcp.len()).then(|| [tcp[2], tcp[3], tcp[0], tcp[1]])
+        (tcp[13] & !(0x08 | 0xc0) == 0x10 && header < tcp.len())
+            .then(|| [tcp[2], tcp[3], tcp[0], tcp[1]])
     }
 
     pub(crate) fn pure_ack_ports(&self) -> Option<[u8; 4]> {
         let (tcp, header) = self.direct_tcp()?;
-        (tcp[13] == 0x10 && header == tcp.len()).then(|| [tcp[0], tcp[1], tcp[2], tcp[3]])
+        (tcp[13] & !0xc0 == 0x10 && header == tcp.len()).then(|| [tcp[0], tcp[1], tcp[2], tcp[3]])
     }
 
     /// Whether a pure ACK can pass this queued packet without reordering its
@@ -216,6 +217,22 @@ mod tests {
             dst: US,
             src: PHONE,
             data,
+        }
+    }
+
+    #[test]
+    fn ecn_does_not_disable_observed_presence_acknowledgments() {
+        for ecn in [0, 0x40, 0x80, 0xc0] {
+            assert!(tcp(0x18 | ecn, b"data").expected_ack_ports().is_some());
+            assert!(tcp(0x10 | ecn, &[]).pure_ack_ports().is_some());
+            for control in [1, 2, 4, 0x20] {
+                assert!(tcp(0x10 | ecn | control, &[]).pure_ack_ports().is_none());
+                assert!(
+                    tcp(0x18 | ecn | control, b"data")
+                        .expected_ack_ports()
+                        .is_none()
+                );
+            }
         }
     }
 
