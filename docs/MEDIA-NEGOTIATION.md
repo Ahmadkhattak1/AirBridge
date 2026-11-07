@@ -35,10 +35,25 @@ Mac model identifiers, identity records or the entire Mac profile was unnecessar
 The earlier `PFMediaCapabilities.decodingSupportForAVAsset:` query accepted
 HDR alone but did not test whether Photos would still choose conversion.
 
-The wire regression parses the Discover reply and checks both hints. Native
-preflight is additional evidence, not an iPhone end-to-end test. The next
-iPhone test must verify saved codec, color metadata, frame count, byte size
-(and source hash when available), plus sender success.
+The wire regression parses the Discover reply and checks both hints.
+
+## iPhone verification, 2026-11-07
+
+The installed `12b7e6d` build received IMG_3158 with one approval. The user
+confirmed the iPhone showed Sent. Windows saved 165,300,237 bytes, matching
+the native Mac sample's byte count, HEVC Main 10 level 153, HLG/BT.2020,
+Dolby Vision configuration, 3840 × 2160 resolution and 760 video samples.
+A source-file hash comparison has not been performed. The file displays
+as 165.3 decimal MB or 157.64 binary MiB; these denote the same byte count.
+
+The receiver processed 165,289,168 archive-body bytes in 113.339 seconds:
+1.458 MB/s. This does not demonstrate a speed improvement over the earlier
+TCP runs. The radio still reported five shared channel-6 slots out of 16,
+with the phone's primary channel 149. A 19.155-second header sample contained
+21,846 large inbound frames, including 1,555 with the retry bit set (7.12%).
+The observed MCS frames still used long GI, despite the corrected short-GI
+advertisement. No radio queue overflows or drops were reported. These are
+measurements of the remaining speed problem, not a claim it is resolved.
 
 ## HTTP/3 status
 
