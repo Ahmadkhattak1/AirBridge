@@ -187,6 +187,78 @@ fn observed_tcp_data_allows_only_one_timely_ack_for_that_peer_and_flow() {
     }
 }
 
+#[test]
+fn unrelated_queued_packets_do_not_block_an_observed_ack() {
+    for same_flow in [false, true] {
+        let mut cfg = Config::new(
+            US,
+            "AirBridge",
+            RadioConstraints {
+                channel: Channel(6),
+                presence: Presence::Fixed,
+            },
+        );
+        cfg.rx_reply = true;
+        cfg.neighbour_echo = false;
+        let mut n = Node::new(cfg, START);
+        let mut channels = [149; SLOTS];
+        channels[8] = 6;
+        let t = meet(&mut n, &seq(channels)).plus(8000);
+        assert!(!n.may_send(PHONE, t));
+        let mut inbound = tcp_syn();
+        inbound.data[40..44].copy_from_slice(&[1, 2, 3, 4]);
+        inbound.data[53] = 0x18;
+        inbound.data[5] += 1;
+        inbound.data.push(42);
+        let mut ack = tcp_syn();
+        ack.src = US;
+        ack.dst = PHONE;
+        ack.data[8..24].copy_from_slice(&US.link_local().octets());
+        ack.data[24..40].copy_from_slice(&PHONE.link_local().octets());
+        ack.data[40..44].copy_from_slice(&[3, 4, 1, 2]);
+        ack.data[53] = 0x10;
+        let mut queued = ack.clone();
+        queued.data[53] = 0x18;
+        queued.data[5] += 1;
+        queued.data.push(43);
+        if !same_flow {
+            queued.data[40] = 7;
+        }
+        // The periodic neighbour echo and a packet from another connection
+        // were enough to block all ACKs to this MAC until the next shared slot.
+        for packet in [Ipv6Packet::echo_request(US, PHONE, 1, 1, b"echo"), queued] {
+            let a: Vec<_> = n.handle(Input::Outbound { now: t, packet }).collect();
+            assert!(transmits(&a).iter().all(|f| f.to != PHONE));
+        }
+        feed(&mut n, t.plus(100), &data_from_phone(&inbound));
+        let a: Vec<_> = n
+            .handle(Input::Outbound {
+                now: t.plus(300),
+                packet: ack.clone(),
+            })
+            .collect();
+        let sent = transmits(&a);
+        assert_eq!(
+            sent.iter().filter(|f| f.to == PHONE).count(),
+            usize::from(!same_flow)
+        );
+        if !same_flow {
+            assert!(sent.iter().any(|f| f.bytes.ends_with(&ack.data)));
+        }
+        assert_eq!(n.backlog(), if same_flow { 3 } else { 2 });
+        // Once the next shared slot opens, the retained packets still drain.
+        let mut at = t.plus(300);
+        for _ in 0..32 {
+            if n.backlog() == 0 {
+                break;
+            }
+            at = at.plus(n.send_wait(PHONE, at).unwrap().max(1));
+            tick(&mut n, at);
+        }
+        assert_eq!(n.backlog(), 0);
+    }
+}
+
 // spec: AWDL-12
 #[test]
 fn a_fixed_radio_advertises_its_channel_in_every_slot() {

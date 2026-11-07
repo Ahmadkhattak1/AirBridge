@@ -5,8 +5,8 @@
       "Profiles": {
         "VTIsHDRAllowedOnDevice": true,
         "VTPerProfileSupport": {
-          "1": { "VTMaxPlaybackLevel": 186 },
-          "2": { "VTMaxPlaybackLevel": 186 },
+          "1": { "VTMaxPlaybackLevel": 186, "VTIsHardwareAccelerated": true },
+          "2": { "VTMaxPlaybackLevel": 186, "VTIsHardwareAccelerated": true },
           "3": {}
         },
         "VTSupportedProfiles": [1, 2, 3]

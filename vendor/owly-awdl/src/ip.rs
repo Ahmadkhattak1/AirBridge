@@ -92,6 +92,15 @@ impl Ipv6Packet {
         (tcp[13] == 0x10 && header == tcp.len()).then(|| [tcp[0], tcp[1], tcp[2], tcp[3]])
     }
 
+    /// Whether a pure ACK can pass this queued packet without reordering its
+    /// TCP flow. Unknown/extended headers stay ordered conservatively.
+    pub(crate) fn independent_of_ack(&self, ack_ports: [u8; 4]) -> bool {
+        if let Some((tcp, _)) = self.direct_tcp() {
+            return tcp[..4] != ack_ports;
+        }
+        self.addrs().is_some() && matches!(self.data.get(6).copied(), Some(17 | ICMPV6))
+    }
+
     /// A TCP SYN to `local` carrying nothing else: the start of a
     /// connection, as a peer opens one.
     pub fn is_bare_syn_to(&self, local: MacAddr) -> bool {

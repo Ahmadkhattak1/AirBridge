@@ -9,6 +9,46 @@ CATALOG = ROOT / "runtime/adapters.tsv"
 
 
 class AdapterCatalog(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "Exercises Linux radio capability selection")
+    def test_ht_profile_matches_selected_band_and_real_mcs_output(self):
+        # RTL8188FTV iw output uses TX/RX, not RX. The old grep missed it.
+        low = """Band 1:
+            Capabilities: 0x6c
+            Maximum RX AMPDU length 65535 bytes (exponent: 0x003)
+            Minimum RX AMPDU time spacing: 16 usec (0x07)
+            HT TX/RX MCS rate indexes supported: 0-7, 32
+            Frequencies:
+                * 2437 MHz [6] (20.0 dBm)
+        """
+        high = """Band 2:
+            Capabilities: 0x16e
+            Maximum RX AMPDU length 32767 bytes (exponent: 0x002)
+            Minimum RX AMPDU time spacing: 4 usec (0x05)
+            HT RX MCS rate indexes supported: 0-15
+            HT TX MCS rate indexes are undefined
+            Frequencies:
+                * 5745 MHz [149] (23.0 dBm)
+        """
+        for report, channel, expected in [
+            (low, 6, "006c 1f 000000ff"),
+            (low + high, 6, "006c 1f 000000ff"),
+            (low + high, 149, "016e 16 0000ffff"),
+            (high + low, 149, "016e 16 0000ffff"),
+            (low.replace("0-7, 32", "0-7, 8-15, 32"), 6, "006c 1f 0000ffff"),
+            (low.replace("0-7, 32", "0-31"), 6, "006c 1f ffffffff"),
+            (low, 149, None),
+            (low.replace("Capabilities: 0x6c", "VHT Capabilities (0x6c):"), 6, None),
+            (low.replace("0-7, 32", "none"), 6, None),
+        ]:
+            with self.subTest(channel=channel, report=report):
+                run = subprocess.run(
+                    ["bash", "-c", 'source "$1"; awdl_ht_profile "$2"', "ht-test",
+                     str(ROOT / "runtime/adapter-profile.sh"), str(channel)],
+                    input=report, capture_output=True, text=True, timeout=5,
+                )
+                self.assertEqual(run.returncode, int(expected is None), run.stderr)
+                self.assertEqual(run.stdout.strip(), expected or "")
+
     @unittest.skipIf(os.name == "nt", "Exercises Linux radio channel selection")
     def test_selects_only_permitted_transfer_channels(self):
         low = "* 2437.0 MHz [6] (20.0 dBm)"

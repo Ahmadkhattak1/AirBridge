@@ -164,7 +164,6 @@ ip link set "$radio" down
 iw dev "$radio" set type managed
 phy=$(basename "$(readlink -f "/sys/class/net/$radio/phy80211")")
 mac=$(cat "/sys/class/net/$radio/address")
-rx_streams=1
 phy_info=$(iw phy "$phy" info)
 channel=$(awdl_channel <<< "$phy_info") || {
     echo 'No permitted AirBridge transfer channel is available on this adapter.' >&2
@@ -172,9 +171,11 @@ channel=$(awdl_channel <<< "$phy_info") || {
 }
 hw_mode=g
 [[ "$channel" == 6 ]] || hw_mode=a
-if grep -E 'HT RX MCS rate indexes supported:.*0-15' <<< "$phy_info" >/dev/null; then
-    rx_streams=2
-fi
+ht_profile=$(awdl_ht_profile "$channel" <<< "$phy_info") || {
+    echo "Could not read this adapter's receive capabilities. Repair AirBridge setup." >&2
+    exit 3
+}
+read -r rx_ht_caps rx_ampdu_params rx_mcs <<< "$ht_profile"
 if [[ "$mode" == send ]]; then
     [[ -f /sys/module/rtl8xxxu/parameters/airbridge_cck ]] || { echo 'The sender wake driver is missing. Repair AirBridge setup.' >&2; exit 3; }
     printf Y > /sys/module/rtl8xxxu/parameters/airbridge_cck
@@ -234,12 +235,14 @@ port=8770
 [[ "$mode" != send ]] || port=0
 node_args=()
 transport_args=()
-if [[ "$mode" == receive && ${AIRBRIDGE_HTTP3:-1} == 1 ]]; then
+# Native ApplicationService discovery is not implemented yet. A bare UDP
+# advertisement is only useful for explicit interoperability experiments.
+if [[ "$mode" == receive && ${AIRBRIDGE_HTTP3:-0} == 1 ]]; then
     transport_args+=(--http3)
     node_args+=(--http3)
 fi
 node_args+=(--tx-rate "${AIRBRIDGE_TX_RATE:-$tx_rate}")
-node_args+=(--channel "$channel" --rx-streams "$rx_streams")
+node_args+=(--channel "$channel" --rx-ht-caps "$rx_ht_caps" --rx-ampdu-params "$rx_ampdu_params" --rx-mcs "$rx_mcs")
 if [[ "$mode" == receive && ${AIRBRIDGE_RX_REPLY:-1} == 1 ]]; then
     node_args+=(--rx-reply)
 fi

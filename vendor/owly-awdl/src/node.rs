@@ -830,7 +830,17 @@ impl Node {
                             && self.clock.slot(at) == self.clock.slot(now)
                             && q.packet.pure_ack_ports() == Some(ports)
                     });
-            let open = *sent < BURST && !blocked.contains(&dst) && (scheduled || observed);
+            // A queued neighbour echo or another connection must not waste a
+            // short observed-presence opportunity. Keep packets in order
+            // within the ACK's TCP flow, including data, FIN and duplicate ACKs.
+            let ordered = !blocked.contains(&dst)
+                || (observed
+                    && q.packet.pure_ack_ports().is_some_and(|ports| {
+                        waiting.iter().all(|prior| {
+                            prior.packet.dst != dst || prior.packet.independent_of_ack(ports)
+                        })
+                    }));
+            let open = *sent < BURST && ordered && (scheduled || observed);
             if !open {
                 if !blocked.contains(&dst) {
                     blocked.push(dst);

@@ -24,6 +24,7 @@ REQUIRED = {
     "advertised_ht_mask_preserves_all_receive_streams",
     "receiver_declares_original_heif_and_hevc_support",
     "observed_tcp_data_allows_only_one_timely_ack_for_that_peer_and_flow",
+    "unrelated_queued_packets_do_not_block_an_observed_ack",
     "http3_streams_require_consent_preserve_files_and_finish_without_sender_fin",
 }
 

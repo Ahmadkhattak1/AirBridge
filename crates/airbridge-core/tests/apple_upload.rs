@@ -65,6 +65,14 @@ fn receiver_declares_original_heif_and_hevc_support() {
         caps["Codecs"]["hvc1"]["Profiles"]["VTIsHDRAllowedOnDevice"].as_bool(),
         Some(true)
     );
+    // Native PHMediaFormatConversionRequest still converts the measured HLG
+    // clip when this hint is missing, even when PFMediaCapabilities reports
+    // that decoding is supported. Check the actual Discover wire payload.
+    for profile in ["1", "2"] {
+        let hevc = &caps["Codecs"]["hvc1"]["Profiles"]["VTPerProfileSupport"][profile];
+        assert_eq!(hevc["VTIsHardwareAccelerated"].as_bool(), Some(true));
+        assert!(hevc["VTMaxPlaybackLevel"].as_u64().unwrap() >= 153);
+    }
     assert!(
         caps["ContainerFormats"]["public.heif-standard"]["HeifSubtypes"]
             .as_array()

@@ -65,8 +65,11 @@ pub fn encode_discover_response(identity: &ReceiverIdentity) -> Result<Vec<u8>> 
     );
     d.insert(
         "ReceiverMediaCapabilities".into(),
-        // We can store the original bitstream. Photos checks the HDR flag
-        // separately from Main 10 support when evaluating an HLG video.
+        // This is a file-preservation profile, not a Windows playback probe.
+        // Photos' conversion preflight requires both HDR and the per-profile
+        // acceleration hint to pass through HLG HEVC. Its simpler decoding-
+        // support query accepts HDR alone but still results in transcoding.
+        // See docs/MEDIA-NEGOTIATION.md for the measured positive/negative cases.
         Value::Data(include_bytes!("media-capabilities.json").to_vec()),
     );
     binary(&Value::Dictionary(d))
