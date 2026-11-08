@@ -74,7 +74,7 @@ try {
     $payload = Get-Content -LiteralPath (Join-Path $InstallRoot 'runtime-manifest.json') -Raw | ConvertFrom-Json
     $overlay = Join-Path $InstallRoot 'airbridge-runtime.tar.gz'
     Assert-Hash $overlay $payload.sha256
-    if ($payload.kernel -ne $deps.kernel -or $payload.version -ne '0.2.0') { throw 'Runtime manifest does not match this installer.' }
+    if ($payload.kernel -ne $deps.kernel -or $payload.version -ne '0.3.0') { throw 'Runtime manifest does not match this installer.' }
     if ($ValidateOnly) { Write-Output 'PACKAGE_VALIDATED'; exit 0 }
     if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {
         throw 'This release supports x64 Windows only.'
@@ -118,7 +118,7 @@ try {
         Invoke-Wsl @('--import', $DistroName, $runtimeDirectory, $base, '--version', '2') | Out-Null
         # Allow retry after an interrupted dependency download or bootstrap,
         # while refusing to take over an unrelated development distribution.
-        Set-Content -LiteralPath $ownershipPath -Value 'AirBridge setup 0.2.0'
+        Set-Content -LiteralPath $ownershipPath -Value 'AirBridge setup 0.3.0'
     }
     $kernel = Invoke-Wsl @('-d',$DistroName,'-u','root','--exec','uname','-r')
     if ($kernel -ne $deps.kernel) {
@@ -138,9 +138,20 @@ try {
     }
     Invoke-Wsl @('-d',$DistroName,'-u','root','--exec','tar','-xzf',(Wsl-Path $overlay),'-C','/') | Out-Null
     Invoke-Wsl @('-d',$DistroName,'-u','root','--exec','bash','/opt/airbridge/bin/bootstrap') | Out-Null
+    $adapterIds = @(Import-Csv -LiteralPath (Join-Path $InstallRoot 'adapters.tsv') -Delimiter "`t" -Header usb_id,chipset,driver,firmware,tx_rate |
+        Where-Object { $_.usb_id -match '^[0-9a-f]{4}:[0-9a-f]{4}$' } | ForEach-Object { $_.usb_id })
+    if (-not $adapterIds.Count) { throw 'The adapter catalog is missing or invalid. Run Setup again.' }
     $rows = & $usbExe list
-    $row = $rows | Where-Object { $_ -match '^\S+\s+0bda:f179\s' } | Select-Object -First 1
-    if (-not $row) { throw 'Plug in the supported Realtek RTL8188FTV adapter, then run Setup again to finish USB configuration.' }
+    $connected = @()
+    foreach ($line in $rows) {
+        if ($line.Trim() -eq 'Persisted:') { break }
+        if ($line -match '^\S+\s+([0-9a-f]{4}:[0-9a-f]{4})\s' -and $Matches[1] -in $adapterIds) { $connected += $line }
+    }
+    $attached = @($connected | Where-Object { $_ -match '\sAttached\s*$' })
+    if ($attached.Count -eq 1) { $row = $attached[0] }
+    elseif ($connected.Count -eq 1) { $row = $connected[0] }
+    elseif ($connected.Count -gt 1) { throw 'More than one supported adapter is connected. Unplug the extra adapter, then run Setup again.' }
+    else { throw 'Plug in a supported Wi-Fi adapter, then run Setup again to finish USB configuration.' }
     if ($row -and $row -match 'Not shared') {
         $busId = ($row.Trim() -split '\s+')[0]
         Invoke-Elevated $usbExe @('bind','--busid',$busId)

@@ -35,6 +35,19 @@ pub fn receive_upload<S: Read + Write>(
     service: Arc<Mutex<ReceiverService>>,
     directory: &Path,
 ) -> Result<HttpResponse> {
+    receive_upload_from(request, service, directory, |sink| {
+        read_request_body_until(reader, request, MAX_UPLOAD, |_, _| {}, sink)
+    })
+}
+
+pub fn receive_upload_from(
+    request: &HttpRequest,
+    service: Arc<Mutex<ReceiverService>>,
+    directory: &Path,
+    read_body: impl FnOnce(
+        &mut dyn FnMut(&[u8]) -> airbridge_core::Result<ControlFlow<()>>,
+    ) -> airbridge_core::Result<()>,
+) -> Result<HttpResponse> {
     let ask = service
         .lock()
         .expect("receiver state poisoned")
@@ -67,31 +80,32 @@ pub fn receive_upload<S: Read + Write>(
             "content_type":content_type, "transfer_encoding":request.headers.get("transfer-encoding"),
             "content_length":request.headers.get("content-length")})
     );
-    let body_result = read_request_body_until(
-        reader,
-        request,
-        MAX_UPLOAD,
-        |bytes, total| {
-            received = bytes;
-            if progress_at.elapsed() >= Duration::from_millis(500) {
-                println!(
-                    "{}",
-                    serde_json::json!({"event":"receiving", "bytes":bytes, "total":total,
-                "elapsed_ms":started.elapsed().as_millis(), "bytes_per_second":bytes as f64 / started.elapsed().as_secs_f64().max(0.001)})
-                );
-                progress_at = Instant::now();
-            }
-        },
-        |bytes| {
-            decoder.feed(bytes, &mut staged)?;
-            // UP-11: the sender may wait for our 200 before it ends the HTTP body.
-            Ok(if decoder.is_complete() {
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            })
-        },
-    );
+    let total = request
+        .headers
+        .get("content-length")
+        .and_then(|value| value.parse::<usize>().ok());
+    let body_result = read_body(&mut |chunk| {
+        received += chunk.len();
+        if received > MAX_UPLOAD {
+            return Err(airbridge_core::Error::Http(
+                "upload exceeds size limit".into(),
+            ));
+        }
+        if progress_at.elapsed() >= Duration::from_millis(500) {
+            println!(
+                "{}",
+                serde_json::json!({"event":"receiving", "bytes":received, "total":total,
+                "elapsed_ms":started.elapsed().as_millis(), "bytes_per_second":received as f64 / started.elapsed().as_secs_f64().max(0.001)})
+            );
+            progress_at = Instant::now();
+        }
+        decoder.feed(chunk, &mut staged)?;
+        Ok(if decoder.is_complete() {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        })
+    });
     if let Err(error) = body_result {
         let archive_complete = decoder.finish(&mut staged).is_ok();
         return Err(error).with_context(|| format!(
@@ -142,6 +156,10 @@ impl StagedUpload {
     }
 
     fn commit(&mut self, directory: &Path) -> Result<Vec<String>> {
+        // TCP and QUIC may finish different approved uploads together. Keep
+        // name selection and publication atomic relative to other uploads.
+        static PUBLISH: Mutex<()> = Mutex::new(());
+        let _publish = PUBLISH.lock().expect("upload publication lock poisoned");
         for offered in &self.ask.files {
             let path = offered
                 .bom_path

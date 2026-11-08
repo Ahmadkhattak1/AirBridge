@@ -65,9 +65,12 @@ pub fn encode_discover_response(identity: &ReceiverIdentity) -> Result<Vec<u8>> 
     );
     d.insert(
         "ReceiverMediaCapabilities".into(),
-        // The receiver stores original media without transcoding it. Advertising
-        // just Version makes Photos convert HEIF to JPEG before uploading.
-        Value::Data(br#"{"Version":1,"Codecs":{"hvc1":{"Profiles":{"VTPerProfileSupport":{"1":{"VTMaxPlaybackLevel":186},"2":{"VTMaxPlaybackLevel":186},"3":{}},"VTSupportedProfiles":[1,2,3]}}},"ContainerFormats":{"public.heif-standard":{"HeifSubtypes":["public.avci","public.heic","public.heif"]}}}"#.to_vec()),
+        // This is a file-preservation profile, not a Windows playback probe.
+        // Photos' conversion preflight requires both HDR and the per-profile
+        // acceleration hint to pass through HLG HEVC. Its simpler decoding-
+        // support query accepts HDR alone but still results in transcoding.
+        // See docs/MEDIA-NEGOTIATION.md for the measured positive/negative cases.
+        Value::Data(include_bytes!("media-capabilities.json").to_vec()),
     );
     binary(&Value::Dictionary(d))
 }

@@ -1,9 +1,12 @@
 [workspace]
-members = ["crates/airbridge-core", "crates/airbridge-cli", "crates/airbridge-app", "crates/airbridge-radio"]
+members = ["crates/airbridge-core", "crates/airbridge-cli", "crates/airbridge-app", "crates/airbridge-radio", "vendor/owly-awdl"]
 resolver = "2"
 
+[patch."https://github.com/t4t5/owly"]
+owly-awdl = { path = "vendor/owly-awdl" }
+
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 authors = ["AirBridge contributors"]

@@ -1,0 +1,28 @@
+# usb_id	chipset	driver	firmware	tx_rate
+# IDs and chipset mappings from linux-msft-wsl-6.18.33.2 rtl8xxxu/core.c dev_table.
+0bda:f179	RTL8188F	rtl8xxxu	rtlwifi/rtl8188fufw.bin	mcs7
+0bda:8179	RTL8188E	rtl8xxxu	rtlwifi/rtl8188eufw.bin	mcs7
+0bda:0179	RTL8188E	rtl8xxxu	rtlwifi/rtl8188eufw.bin	mcs7
+0df6:0076	RTL8188E	rtl8xxxu	rtlwifi/rtl8188eufw.bin	mcs7
+2001:3311	RTL8188E	rtl8xxxu	rtlwifi/rtl8188eufw.bin	mcs7
+2001:330f	RTL8188E	rtl8xxxu	rtlwifi/rtl8188eufw.bin	mcs7
+2001:3310	RTL8188E	rtl8xxxu	rtlwifi/rtl8188eufw.bin	mcs7
+2001:331b	RTL8188E	rtl8xxxu	rtlwifi/rtl8188eufw.bin	mcs7
+07b8:8179	RTL8188E	rtl8xxxu	rtlwifi/rtl8188eufw.bin	mcs7
+056e:4008	RTL8188E	rtl8xxxu	rtlwifi/rtl8188eufw.bin	mcs7
+2357:010c	RTL8188E	rtl8xxxu	rtlwifi/rtl8188eufw.bin	mcs7
+2357:0111	RTL8188E	rtl8xxxu	rtlwifi/rtl8188eufw.bin	mcs7
+2c4e:0102	RTL8188E	rtl8xxxu	rtlwifi/rtl8188eufw.bin	mcs7
+0b05:18f0	RTL8188E	rtl8xxxu	rtlwifi/rtl8188eufw.bin	mcs7
+7392:b811	RTL8188E	rtl8xxxu	rtlwifi/rtl8188eufw.bin	mcs7
+0bda:ffef	RTL8188E	rtl8xxxu	rtlwifi/rtl8188eufw.bin	mcs7
+0bda:818b	RTL8192E	rtl8xxxu	rtlwifi/rtl8192eu_nic.bin	mcs7
+2357:0108	RTL8192E	rtl8xxxu	rtlwifi/rtl8192eu_nic.bin	mcs7
+2001:3319	RTL8192E	rtl8xxxu	rtlwifi/rtl8192eu_nic.bin	mcs7
+2357:0109	RTL8192E	rtl8xxxu	rtlwifi/rtl8192eu_nic.bin	mcs7
+0bda:f192	RTL8192F	rtl8xxxu	rtlwifi/rtl8192fufw.bin	mcs7
+0b05:18f1	RTL8192F	rtl8xxxu	rtlwifi/rtl8192fufw.bin	mcs7
+7392:b722	RTL8192F	rtl8xxxu	rtlwifi/rtl8192fufw.bin	mcs7
+0bda:318b	RTL8192F	rtl8xxxu	rtlwifi/rtl8192fufw.bin	mcs7
+2357:0135	RTL8192F	rtl8xxxu	rtlwifi/rtl8192fufw.bin	mcs7
+2001:3328	RTL8192F	rtl8xxxu	rtlwifi/rtl8192fufw.bin	mcs7

@@ -30,16 +30,20 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libasound2-dev
       - name: Regression tests
-        run: cargo +1.95.0 test --workspace --locked
+        run: cargo +1.95.0 test --workspace --locked --all-features
       - name: Required regression coverage
         run: python scripts/check-test-contract.py
+      - name: Wi-Fi descriptor regressions
+        if: runner.os == 'Linux'
+        run: bash scripts/test-radio-driver.sh
       - name: Build release
         run: cargo +1.95.0 build --release --workspace --locked
       - name: Packaging tests
         run: python -m unittest discover -s scripts/tests -v
       - name: Runtime shell syntax
         if: runner.os == 'Linux'
-        run: bash -n runtime/airbridge-radio.sh runtime/bootstrap.sh scripts/package-runtime.sh
+        run: |
+          for script in runtime/*.sh scripts/*.sh; do bash -n "$script"; done
       - name: Setup script syntax
         if: runner.os == 'Windows'
         shell: powershell

@@ -13,8 +13,7 @@ if [[ "$mode" == send ]]; then
     send_files=("$@")
     [[ ${#send_files[@]} -gt 0 ]] || { echo 'No files selected' >&2; exit 2; }
 fi
-vendor=0bda
-product=f179
+source "$root/bin/adapter-profile.sh"
 run=/run/airbridge
 logs=/var/log/airbridge
 if [[ "$mode" == stop ]]; then
@@ -84,8 +83,10 @@ cleanup() {
     fi
     if [[ -n "$experiment_loaded" ]]; then
         [[ ! -e /sys/module/rtl8xxxu/parameters/airbridge_cck ]] || printf N > /sys/module/rtl8xxxu/parameters/airbridge_cck
-        if ! grep -q '^rtl8xxxu ' /proc/modules || rmmod rtl8xxxu; then
-            insmod "$root/modules/rtl8xxxu.ko" || true
+        if [[ ! -f /sys/module/rtl8xxxu/parameters/airbridge_inject_rate ]]; then
+            if ! grep -q '^rtl8xxxu ' /proc/modules || rmmod rtl8xxxu; then
+                insmod "$root/modules/rtl8xxxu.ko" || true
+            fi
         fi
     fi
     printf '%s\n' "$firmware_original" > "$firmware_parameter"
@@ -95,23 +96,19 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-matches=()
 # usbipd can report success before the kernel has enumerated the device.
 # Keep this WSL session alive through that delay instead of failing immediately.
 for _ in {1..50}; do
-    matches=()
-    for usb in /sys/bus/usb/devices/*; do
-        [[ -f "$usb/idVendor" && -f "$usb/idProduct" ]] || continue
-        [[ $(cat "$usb/idVendor") == "$vendor" && $(cat "$usb/idProduct") == "$product" ]] || continue
-        matches+=("$usb")
-    done
-    [[ ${#matches[@]} -gt 0 ]] && break
+    if select_adapter "$root/adapters.tsv" /sys/bus/usb/devices; then break; else status=$?; fi
+    [[ "$status" == 1 ]] || exit "$status"
     sleep 0.1
 done
-[[ ${#matches[@]} -eq 1 ]] || {
-    echo '{"event":"error","message":"The Realtek AirBridge adapter is not attached"}'
+[[ -n ${usb_id:-} ]] || {
+    echo '{"event":"error","message":"A supported AirBridge adapter is not attached"}'
     exit 2
 }
+[[ -f "$root/firmware/$firmware" ]] || { echo "The $chipset firmware is missing. Repair AirBridge setup." >&2; exit 3; }
+echo "{\"event\":\"adapter-profile\",\"usb_id\":\"$usb_id\",\"chipset\":\"$chipset\",\"driver\":\"$driver\"}"
 
 cp -au "$root/firmware/." /mnt/wsl/airbridge-firmware/
 cp -u /lib/firmware/regulatory.db /mnt/wsl/airbridge-firmware/
@@ -121,23 +118,22 @@ printf '%s' /mnt/wsl/airbridge-firmware > "$firmware_parameter"
 modprobe cfg80211
 modprobe mac80211
 modprobe led-class
-if [[ "$mode" == send ]]; then
-    test -f "$root/modules/rtl8xxxu-cck-experiment.ko" || { echo 'The experimental sender driver is missing' >&2; exit 3; }
-    if grep -q '^rtl8xxxu ' /proc/modules; then rmmod rtl8xxxu; fi
-    experiment_loaded=1
-    insmod "$root/modules/rtl8xxxu-cck-experiment.ko" airbridge_cck=1
-elif [[ ${AIRBRIDGE_INJECT_RATE:-1} == 1 && -f "$root/modules/rtl8xxxu-awdl.ko" ]]; then
-    if [[ ! -f /sys/module/rtl8xxxu/parameters/airbridge_inject_rate ]]; then
+if [[ "$mode" == send || ${AIRBRIDGE_INJECT_RATE:-1} == 1 ]] && [[ -f "$root/modules/rtl8xxxu-awdl.ko" ]]; then
+    if [[ ! -f /sys/module/rtl8xxxu/parameters/airbridge_cck || ! -f /sys/module/rtl8xxxu/parameters/airbridge_inject_rate || ! -f /sys/module/rtl8xxxu/parameters/airbridge_rx_amsdu ]]; then
         if grep -q '^rtl8xxxu ' /proc/modules; then rmmod rtl8xxxu; fi
-        insmod "$root/modules/rtl8xxxu-awdl.ko" airbridge_inject_rate=1
+        insmod "$root/modules/rtl8xxxu-awdl.ko" airbridge_inject_rate="${AIRBRIDGE_INJECT_RATE:-1}"
     fi
-    echo '{"event":"radio-driver","injection_rate":true}'
+    printf '%s' "${AIRBRIDGE_INJECT_RATE:-1}" > /sys/module/rtl8xxxu/parameters/airbridge_inject_rate
+    echo "{\"event\":\"radio-driver\",\"injection_rate\":${AIRBRIDGE_INJECT_RATE:-1}}"
+elif [[ "$mode" == send ]]; then
+    echo 'The sender wake driver is missing. Repair AirBridge setup.' >&2
+    exit 3
 else
     if [[ -f /sys/module/rtl8xxxu/parameters/airbridge_inject_rate ]]; then rmmod rtl8xxxu; fi
     if ! grep -q '^rtl8xxxu ' /proc/modules; then insmod "$root/modules/rtl8xxxu.ko"; fi
 fi
 
-usb=${matches[0]}
+usb=$selected_usb
 for usbif in "$usb":*; do
     [[ -d "$usbif" ]] || continue
     if [[ ! -L "$usbif/driver" ]]; then
@@ -168,7 +164,23 @@ ip link set "$radio" down
 iw dev "$radio" set type managed
 phy=$(basename "$(readlink -f "/sys/class/net/$radio/phy80211")")
 mac=$(cat "/sys/class/net/$radio/address")
+phy_info=$(iw phy "$phy" info)
+channel=$(awdl_channel <<< "$phy_info") || {
+    echo 'No permitted AirBridge transfer channel is available on this adapter.' >&2
+    exit 3
+}
+hw_mode=g
+[[ "$channel" == 6 ]] || hw_mode=a
+ht_profile=$(awdl_ht_profile "$channel" <<< "$phy_info") || {
+    echo "Could not read this adapter's receive capabilities. Repair AirBridge setup." >&2
+    exit 3
+}
+read -r rx_ht_caps rx_ampdu_params rx_mcs <<< "$ht_profile"
 if [[ "$mode" == send ]]; then
+    [[ -f /sys/module/rtl8xxxu/parameters/airbridge_cck ]] || { echo 'The sender wake driver is missing. Repair AirBridge setup.' >&2; exit 3; }
+    printf Y > /sys/module/rtl8xxxu/parameters/airbridge_cck
+    # Always restore normal transmission on cancellation during the wake phase.
+    experiment_loaded=1
     iw phy "$phy" interface add abcck0 type monitor
     cck_created=1
     ip link set abcck0 address "$mac"
@@ -181,6 +193,7 @@ if [[ "$mode" == send ]]; then
     iw dev abcck0 del
     cck_created=
     printf N > /sys/module/rtl8xxxu/parameters/airbridge_cck
+    experiment_loaded=
 fi
 # rtl8xxxu has no active monitor or IBSS. A private hidden AP supplies
 # hardware ACKs while a separate monitor carries AWDL. No IP network is hosted.
@@ -195,8 +208,8 @@ interface=abap0
 driver=nl80211
 ssid=AirBridge-radio
 ignore_broadcast_ssid=1
-hw_mode=g
-channel=6
+hw_mode=$hw_mode
+channel=$channel
 ieee80211n=1
 beacon_int=1000
 wpa=2
@@ -221,9 +234,27 @@ rm -f "$run/radio.ready" "$run/approval"
 port=8770
 [[ "$mode" != send ]] || port=0
 node_args=()
-node_args+=(--tx-rate "${AIRBRIDGE_TX_RATE:-mcs7}")
+transport_args=()
+# Native ApplicationService discovery is not implemented yet. A bare UDP
+# advertisement is only useful for explicit interoperability experiments.
+if [[ "$mode" == receive && ${AIRBRIDGE_HTTP3:-0} == 1 ]]; then
+    transport_args+=(--http3)
+    node_args+=(--http3)
+fi
+node_args+=(--tx-rate "${AIRBRIDGE_TX_RATE:-$tx_rate}")
+node_args+=(--channel "$channel" --rx-ht-caps "$rx_ht_caps" --rx-ampdu-params "$rx_ampdu_params" --rx-mcs "$rx_mcs")
+if [[ "$mode" == receive && ${AIRBRIDGE_RX_REPLY:-1} == 1 ]]; then
+    node_args+=(--rx-reply)
+fi
 if [[ "$mode" == receive && ${AIRBRIDGE_RX_AMPDU:-1} == 1 ]]; then
     node_args+=(--rx-ampdu)
+    # Only promise nested A-MSDUs when the loaded driver can receive their
+    # full size. Older runtime modules retain the conservative response.
+    if [[ ${AIRBRIDGE_RX_AMSDU:-1} == 1 && ${AIRBRIDGE_INJECT_RATE:-1} == 1 &&
+          -f /sys/module/rtl8xxxu/parameters/airbridge_rx_amsdu ]] &&
+       [[ $(cat /sys/module/rtl8xxxu/parameters/airbridge_rx_amsdu) == Y ]]; then
+        node_args+=(--rx-amsdu)
+    fi
 fi
 [[ "$mode" == receive ]] || node_args+=(--browse)
 RUST_LOG=info "$root/bin/airbridge-radio-node" --monitor abmon0 --name "$name" --port "$port" --ready-file "$run/radio.ready" "${node_args[@]}" >"$logs/radio.log" 2>&1 &
@@ -267,7 +298,7 @@ fi
 
 address=$(ip -6 -o addr show dev awdl0 scope link | awk '{print $4}' | cut -d/ -f1)
 ifindex=$(cat /sys/class/net/awdl0/ifindex)
-"$root/bin/airbridge" receive --listen "[$address%$ifindex]:8770" --dir "$destination" --name "$name" --approval-file "$run/approval" >"$logs/receiver.log" 2>&1 &
+"$root/bin/airbridge" receive --listen "[$address%$ifindex]:8770" --dir "$destination" --name "$name" --approval-file "$run/approval" "${transport_args[@]}" >"$logs/receiver.log" 2>&1 &
 receiver_pid=$!
 for _ in {1..50}; do
     kill -0 "$receiver_pid" 2>/dev/null || { cat "$logs/receiver.log" >&2; exit 5; }

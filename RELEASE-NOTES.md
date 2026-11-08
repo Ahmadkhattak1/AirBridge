@@ -1,4 +1,12 @@
-# AirBridge 0.2.0
+# AirBridge 0.3.0
+
+- Requests original HEVC HDR media from the iPhone. The tested 165 MB clip arrived with its original byte count and video properties.
+- Adds a shared USB adapter catalog and reads the selected radio's actual capabilities. RTL8188FTV remains the physically verified adapter.
+- Fixes receive buffer sizing for aggregated Wi-Fi frames and preserves TCP congestion feedback in the quick acknowledgment path.
+
+The release uses the existing TCP transfer path by default. The [throughput diagnosis](docs/THROUGHPUT-DIAGNOSIS.md) records the measured radio limits and separate timing and reordering experiments.
+
+## AirBridge 0.2.0
 
 Windows setup installer for native iPhone AirDrop with the supported Realtek RTL8188FTV USB adapter (`0bda:f179`). See [installation instructions](docs/INSTALLATION.md).
 

@@ -51,7 +51,7 @@ class ReleaseContract(unittest.TestCase):
                 dependencies = json.loads((ROOT / "installer/dependencies.json").read_text())
                 (payload / "dependencies.json").write_text(json.dumps(dependencies))
                 (payload / "runtime-manifest.json").write_text(json.dumps({
-                    "version": "0.2.0", "kernel": dependencies["kernel"],
+                    "version": "0.3.0", "kernel": dependencies["kernel"],
                     "sha256": "0" * 64 if corrupt else hashlib.sha256(archive).hexdigest(),
                 }))
                 result = subprocess.run([

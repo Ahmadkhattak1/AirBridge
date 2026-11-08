@@ -12,6 +12,7 @@ use airbridge_core::{
     read_request_body_to, read_request_head, read_response_buffered, write_request, write_response,
 };
 
+mod http3;
 mod incoming;
 use anyhow::{Context, Result, bail};
 use rcgen::generate_simple_self_signed;
@@ -469,6 +470,18 @@ fn receive(args: Vec<String>) -> Result<()> {
     // AirDrop is free to use a fresh TLS connection for /Upload.  Keep the
     // receiver state at listener scope so an accepted /Ask survives that
     // connection boundary.
+    let _http3 = if args.iter().any(|a| a == "--http3") {
+        Some(http3::start(
+            listener.local_addr()?,
+            tls.as_ref().clone(),
+            identity.clone(),
+            directory.clone(),
+            yes,
+            approval_file.clone(),
+        )?)
+    } else {
+        None
+    };
     let mut services = std::collections::HashMap::new();
     println!(
         "{{\"event\":\"ready\",\"name\":{}}}",
@@ -575,13 +588,42 @@ fn serve(
             "{}",
             serde_json::json!({"event":"request", "path":request.path, "bytes":request.body.len(), "type":request.headers.get("content-type"), "peer":reader.get_ref().sock.peer_addr()?.ip().to_string()})
         );
-        let (response, events) = service.lock().expect("receiver state poisoned").handle(
-            request,
-            |ask| {
+        let response = handle_control(request, &service, directory, yes, approval_file)?;
+        write_response(reader.get_mut(), &response)?;
+        reader.get_mut().flush()?;
+        if response
+            .headers
+            .get("connection")
+            .is_some_and(|v| v == "close")
+        {
+            return Ok(());
+        }
+    }
+}
+
+fn handle_control(
+    request: HttpRequest,
+    service: &Mutex<ReceiverService>,
+    directory: &Path,
+    yes: bool,
+    approval_file: Option<&Path>,
+) -> Result<airbridge_core::HttpResponse> {
+    let (response, events) =
+        service
+            .lock()
+            .expect("receiver state poisoned")
+            .handle(request, |ask| {
                 if yes {
                     return true;
                 }
                 if let Some(path) = approval_file {
+                    // The desktop has one prompt and one decision file shared
+                    // by the TCP and QUIC listeners. Never consume another
+                    // offer's decision, including across different peers.
+                    static APPROVAL: Mutex<()> = Mutex::new(());
+                    let Ok(_prompt) = APPROVAL.try_lock() else {
+                        return false;
+                    };
                     let _ = fs::remove_file(path);
                     println!(
                         "{{\"event\":\"approval-needed\",\"sender\":{},\"files\":{},\"links\":{}}}",
@@ -609,56 +651,46 @@ fn serve(
                 let mut answer = String::new();
                 std::io::stdin().read_line(&mut answer).is_ok()
                     && answer.trim().eq_ignore_ascii_case("y")
-            },
-        )?;
-        for event in events {
-            match event {
-                ReceiverEvent::ConsentRequested(ask) => println!(
-                    "{{\"event\":\"ask\",\"sender\":{},\"files\":{},\"links\":{}}}",
-                    serde_json::to_string(&ask.sender_name)?,
-                    ask.files.len(),
-                    ask.items.len()
-                ),
-                ReceiverEvent::FilesReceived(files) => {
-                    let mut saved = Vec::new();
-                    for file in files {
-                        let target = unique_path(directory, &file.path);
-                        let is_directory = file.mode & 0o170000 == 0o040000;
-                        if is_directory {
-                            fs::create_dir_all(&target)?;
-                            continue;
-                        } else if let Some(parent) = target.parent() {
-                            fs::create_dir_all(parent)?;
-                        }
-                        fs::write(&target, file.data)?;
-                        saved.push(target.display().to_string());
+            })?;
+    for event in events {
+        match event {
+            ReceiverEvent::ConsentRequested(ask) => println!(
+                "{{\"event\":\"ask\",\"sender\":{},\"files\":{},\"links\":{}}}",
+                serde_json::to_string(&ask.sender_name)?,
+                ask.files.len(),
+                ask.items.len()
+            ),
+            ReceiverEvent::FilesReceived(files) => {
+                let mut saved = Vec::new();
+                for file in files {
+                    let target = unique_path(directory, &file.path);
+                    let is_directory = file.mode & 0o170000 == 0o040000;
+                    if is_directory {
+                        fs::create_dir_all(&target)?;
+                        continue;
+                    } else if let Some(parent) = target.parent() {
+                        fs::create_dir_all(parent)?;
                     }
-                    println!(
-                        "{{\"event\":\"received\",\"files\":{}}}",
-                        serde_json::to_string(&saved)?
-                    );
+                    fs::write(&target, file.data)?;
+                    saved.push(target.display().to_string());
                 }
-                ReceiverEvent::LinksReceived(links) => println!(
-                    "{{\"event\":\"links\",\"items\":{}}}",
-                    serde_json::to_string(&links)?
-                ),
-                ReceiverEvent::Discovered => println!("{{\"event\":\"discovered\"}}"),
-                ReceiverEvent::Accepted(_) => {
-                    println!("{{\"event\":\"accepted\"}}");
-                }
-                ReceiverEvent::Declined => println!("{{\"event\":\"declined\"}}"),
+                println!(
+                    "{{\"event\":\"received\",\"files\":{}}}",
+                    serde_json::to_string(&saved)?
+                );
             }
-        }
-        write_response(reader.get_mut(), &response)?;
-        reader.get_mut().flush()?;
-        if response
-            .headers
-            .get("connection")
-            .is_some_and(|v| v == "close")
-        {
-            return Ok(());
+            ReceiverEvent::LinksReceived(links) => println!(
+                "{{\"event\":\"links\",\"items\":{}}}",
+                serde_json::to_string(&links)?
+            ),
+            ReceiverEvent::Discovered => println!("{{\"event\":\"discovered\"}}"),
+            ReceiverEvent::Accepted(_) => {
+                println!("{{\"event\":\"accepted\"}}");
+            }
+            ReceiverEvent::Declined => println!("{{\"event\":\"declined\"}}"),
         }
     }
+    Ok(response)
 }
 
 // The success response can cross the sender's last HTTP chunk on the wire.

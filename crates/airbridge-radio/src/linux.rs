@@ -9,6 +9,31 @@ use owly_radio::native::Native;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::{net::UdpSocket, sync::watch};
 
+fn receive_capabilities(args: &[String]) -> Result<owly_awdl::tlv::HtCapabilities> {
+    let field = |key| -> Result<u32> {
+        let value = args
+            .windows(2)
+            .find(|a| a[0] == key)
+            .map(|a| a[1].as_str())
+            .with_context(|| {
+                format!("{key} must come from the selected adapter's iw phy report")
+            })?;
+        u32::from_str_radix(value, 16).with_context(|| format!("invalid {key}"))
+    };
+    let capabilities = u16::try_from(field("--rx-ht-caps")?)?;
+    let ampdu_params = u8::try_from(field("--rx-ampdu-params")?)?;
+    let rx_mcs = field("--rx-mcs")?;
+    anyhow::ensure!(
+        rx_mcs != 0 && ampdu_params & !0x1f == 0,
+        "invalid HT receive capabilities"
+    );
+    Ok(owly_awdl::tlv::HtCapabilities {
+        capabilities,
+        ampdu_params,
+        rx_mcs,
+    })
+}
+
 pub fn run() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -21,6 +46,38 @@ pub fn run() -> Result<()> {
         .block_on(start())
 }
 
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    #[test]
+    fn receive_profile_requires_actual_adapter_fields() {
+        let args: Vec<String> = [
+            "--rx-ht-caps",
+            "006c",
+            "--rx-ampdu-params",
+            "1f",
+            "--rx-mcs",
+            "000000ff",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        let ht = receive_capabilities(&args).unwrap();
+        assert!(ht.sgi20());
+        assert_eq!(
+            (ht.capabilities, ht.ampdu_params, ht.rx_mcs),
+            (0x6c, 0x1f, 0xff)
+        );
+        assert!(receive_capabilities(&[]).is_err());
+        for (index, value) in [(1, "10000"), (3, "ff"), (5, "0"), (5, "invalid")] {
+            let mut invalid = args.clone();
+            invalid[index] = value.into();
+            assert!(receive_capabilities(&invalid).is_err());
+        }
+    }
+}
+
 async fn start() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let option = |key: &str| args.windows(2).find(|a| a[0] == key).map(|a| a[1].clone());
@@ -31,6 +88,11 @@ async fn start() -> Result<()> {
     let name = option("--name").unwrap_or_else(|| "AirBridge".into());
     let port: u16 = option("--port").unwrap_or_else(|| "8770".into()).parse()?;
     let browse = args.iter().any(|arg| arg == "--browse");
+    let channel = option("--channel")
+        .unwrap_or_else(|| "6".into())
+        .parse::<u8>()?;
+    anyhow::ensure!([6, 44, 149].contains(&channel), "unsupported AWDL channel");
+    let ht = receive_capabilities(&args)?;
     let mac: MacAddr = std::fs::read_to_string(format!("/sys/class/net/{monitor}/address"))?
         .trim()
         .parse()
@@ -39,22 +101,28 @@ async fn start() -> Result<()> {
         mac,
         &name,
         RadioConstraints {
-            channel: Channel(6),
+            channel: Channel(channel),
             presence: Presence::Fixed,
         },
     );
-    // The RTL8188FTV has one HT stream. The protocol library checks the
-    // peer's advertised MCS support and falls back to the basic rate.
+    // The runtime supplies capabilities from the actual selected radio band.
+    // The library checks the peer's MCS support before sending HT frames.
     let rate = option("--tx-rate").unwrap_or_else(|| "mcs7".into());
     cfg.rate = TxRate::parse(&rate).context("invalid --tx-rate")?;
+    cfg.ht = ht;
     cfg.amsdu = true;
-    // The runtime opts in for the tested RTL8188FTV receiver. Other radio
-    // setups must support hardware Block Ack before advertising acceptance.
+    cfg.rx_reply = args.iter().any(|arg| arg == "--rx-reply");
+    // Opt in only on radio setups that supply hardware Block Ack reception.
     cfg.accept_addba = args.iter().any(|arg| arg == "--rx-ampdu");
+    cfg.rx_amsdu = args.iter().any(|arg| arg == "--rx-amsdu");
     println!(
         "{}",
         serde_json::json!({"event":"radio-config", "tx_rate":cfg.rate.to_string(),
-        "tx_amsdu":cfg.amsdu, "rx_ampdu":cfg.accept_addba, "channel":6})
+        "tx_amsdu":cfg.amsdu, "rx_ampdu":cfg.accept_addba, "rx_amsdu":cfg.rx_amsdu, "channel":channel,
+        "rx_ht_caps":format!("{:04x}", cfg.ht.capabilities),
+        "rx_ampdu_params":format!("{:02x}", cfg.ht.ampdu_params),
+        "rx_mcs":format!("{:08x}", cfg.ht.rx_mcs),
+        "rx_sgi20":cfg.ht.sgi20(), "rx_reply":cfg.rx_reply})
     );
     let (peer_tx, mut peers) = watch::channel(Vec::new());
     let node = Native::start(&monitor, "awdl0", cfg, peer_tx)?;
@@ -72,6 +140,12 @@ async fn start() -> Result<()> {
     };
     let group = SocketAddrV6::new(mdns::MDNS_GROUP, mdns::MDNS_PORT, 0, scope);
     let announcement = service.announcement();
+    let quic = args.iter().any(|arg| arg == "--http3").then(|| {
+        // The captured Application Service uses a UUID-shaped instance and
+        // an empty TXT record, independently of the legacy AirDrop instance.
+        let instance = format!("00000000-0000-4000-8000-{}", service.instance);
+        crate::quic_discovery::QuicService::new(&service, &instance)
+    });
     let mut announcer = Announcer::new(
         Some(Burst {
             count: 64,
@@ -127,6 +201,9 @@ async fn start() -> Result<()> {
                     if announcer.on_timer(Instant::now()) {
                         if port != 0 {
                             socket.send_to(&announcement, group).await.context("announce AirBridge")?;
+                            if let Some(quic) = &quic {
+                                socket.send_to(&quic.announcement(false), group).await?;
+                            }
                         }
                         if browse {
                             let query = Message { questions: vec![mdns::Question {
@@ -150,6 +227,10 @@ async fn start() -> Result<()> {
                         report_browser(&mut browser, mac.link_local(), scope);
                     }
                     if port == 0 { continue; }
+                    if let Some(quic) = &quic
+                        && let Some(reply) = quic.answer(&query, from.port() != mdns::MDNS_PORT) {
+                        socket.send_to(&reply.message, if reply.unicast {from} else {group}).await?;
+                    }
                     if let Some(reply) = service.answer(&query, from.port() != mdns::MDNS_PORT) {
                         println!("{}", serde_json::json!({"event":"discovery-query", "peer":from.ip().to_string()}));
                         socket.send_to(&reply.message, if reply.unicast {from} else {group}).await?;
@@ -161,6 +242,9 @@ async fn start() -> Result<()> {
     }.await;
     if port != 0 {
         let _ = socket.send_to(&service.goodbye(), group).await;
+        if let Some(quic) = &quic {
+            let _ = socket.send_to(&quic.announcement(true), group).await;
+        }
     }
     node.stop();
     result

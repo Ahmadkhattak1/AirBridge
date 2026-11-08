@@ -4,7 +4,7 @@
 [Setup]
 AppId={{F8DCD771-3245-48B6-9845-9330D00D33FA}
 AppName=AirBridge
-AppVersion=0.2.0
+AppVersion=0.3.0
 AppPublisher=AirBridge contributors
 AppPublisherURL=https://github.com/Ahmadkhattak1/AirBridge
 DefaultDirName={localappdata}\Programs\AirBridge
@@ -16,7 +16,7 @@ MinVersion=10.0.19041
 WizardStyle=modern
 Compression=lzma2
 SolidCompression=yes
-OutputBaseFilename=AirBridge-0.2.0-Setup-x64
+OutputBaseFilename=AirBridge-0.3.0-Setup-x64
 OutputDir={#PayloadDir}\..
 UninstallDisplayIcon={app}\AirBridge.exe
 CloseApplications=yes
@@ -30,6 +30,7 @@ Source: "{#PayloadDir}\runtime-manifest.json"; DestDir: "{app}"; Flags: ignoreve
 Source: "{#PayloadDir}\THIRD-PARTY-LICENSES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Setup-Runtime.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dependencies.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\runtime\adapters.tsv"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]

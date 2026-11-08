@@ -1,6 +1,6 @@
-AirBridge 0.2.0 for Windows x64
+AirBridge 0.3.0 for Windows x64
 
-Plug in a Realtek RTL8188FTV USB Wi-Fi adapter (USB ID 0bda:f179) before continuing. This is the supported adapter for this release. Normal laptop Wi-Fi alone is insufficient.
+Plug in a compatible USB Wi-Fi adapter before continuing. The Realtek RTL8188FTV (USB ID 0bda:f179) is verified on hardware. Additional recognized USB IDs are listed in the repository's adapter catalog and still need physical transfer testing.
 
 Setup installs the Windows app and prepares its dedicated Linux runtime. It downloads Ubuntu components and, when needed, Microsoft WSL 2.7.13 and usbipd-win 5.3.0 from their publishers. Allow administrator prompts for those dependencies. An internet connection and approximately 2 GB of free space are required. Windows may need a restart; run Setup again afterward to finish.
 
@@ -10,4 +10,4 @@ AirBridge keeps the dedicated adapter attached while open. The iPhone uses its b
 
 Uninstall removes the Windows app. WSL, USB support, the AirBridge runtime, and received files are kept so uninstalling cannot erase your data. Cleanup instructions are in the repository's installation guide.
 
-Linux driver source for this release is provided beside the installer as AirBridge-0.2.0-driver-source.tar.xz. Other third-party notices are installed with the app.
+Linux driver source for this release is provided beside the installer as AirBridge-0.3.0-driver-source.tar.xz. Other third-party notices are installed with the app.
