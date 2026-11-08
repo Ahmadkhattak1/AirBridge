@@ -74,7 +74,7 @@ try {
     $payload = Get-Content -LiteralPath (Join-Path $InstallRoot 'runtime-manifest.json') -Raw | ConvertFrom-Json
     $overlay = Join-Path $InstallRoot 'airbridge-runtime.tar.gz'
     Assert-Hash $overlay $payload.sha256
-    if ($payload.kernel -ne $deps.kernel -or $payload.version -ne '0.2.0') { throw 'Runtime manifest does not match this installer.' }
+    if ($payload.kernel -ne $deps.kernel -or $payload.version -ne '0.3.0') { throw 'Runtime manifest does not match this installer.' }
     if ($ValidateOnly) { Write-Output 'PACKAGE_VALIDATED'; exit 0 }
     if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {
         throw 'This release supports x64 Windows only.'
@@ -118,7 +118,7 @@ try {
         Invoke-Wsl @('--import', $DistroName, $runtimeDirectory, $base, '--version', '2') | Out-Null
         # Allow retry after an interrupted dependency download or bootstrap,
         # while refusing to take over an unrelated development distribution.
-        Set-Content -LiteralPath $ownershipPath -Value 'AirBridge setup 0.2.0'
+        Set-Content -LiteralPath $ownershipPath -Value 'AirBridge setup 0.3.0'
     }
     $kernel = Invoke-Wsl @('-d',$DistroName,'-u','root','--exec','uname','-r')
     if ($kernel -ne $deps.kernel) {

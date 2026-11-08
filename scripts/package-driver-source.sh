@@ -13,7 +13,7 @@ gcc --version > "$stage/airbridge-compiler-version.txt"
 mkdir -p "$stage/airbridge-patches"
 cp "$root/runtime/rtl8188f-awdl.patch" "$root/experiments/wifi_ble/rtl8188f-cck-experiment.patch" "$stage/airbridge-patches/"
 cat > "$stage/AIRBRIDGE-BUILD.md" <<'EOF'
-# AirBridge 0.2.0 matching driver source
+# AirBridge 0.3.0 matching driver source
 
 This is the complete upstream Microsoft WSL2 Linux kernel source used for the
 distributed modules. See airbridge-upstream-commit.txt, COPYING, LICENSES,
@@ -33,6 +33,6 @@ dependencies used during development. strip --strip-debug removes debug info
 from the distributed copies. No driver change is made to the stock variant.
 
 Both patches are GPL-2.0 driver changes. The independently built Rust application
-and radio integration sources are in the AirBridge v0.2.0 Git tag.
+and radio integration sources are in the AirBridge v0.3.0 Git tag.
 EOF
 tar -C "$stage" --owner=0 --group=0 -c . | xz -T2 -2 > "$output"

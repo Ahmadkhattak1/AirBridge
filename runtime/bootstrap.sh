@@ -12,5 +12,5 @@ depmod -a
 install -d /var/log/airbridge
 chmod 700 /var/log/airbridge
 printf '[user]\ndefault=root\n[boot]\nsystemd=false\n' > /etc/wsl.conf
-printf 'AirBridge runtime 0.2.0\n' > /opt/airbridge/runtime-version
+printf 'AirBridge runtime 0.3.0\n' > /opt/airbridge/runtime-version
 echo AIRBRIDGE_SETUP_COMPLETE

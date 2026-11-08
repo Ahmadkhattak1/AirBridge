@@ -4,7 +4,7 @@
 [Setup]
 AppId={{F8DCD771-3245-48B6-9845-9330D00D33FA}
 AppName=AirBridge
-AppVersion=0.2.0
+AppVersion=0.3.0
 AppPublisher=AirBridge contributors
 AppPublisherURL=https://github.com/Ahmadkhattak1/AirBridge
 DefaultDirName={localappdata}\Programs\AirBridge
@@ -16,7 +16,7 @@ MinVersion=10.0.19041
 WizardStyle=modern
 Compression=lzma2
 SolidCompression=yes
-OutputBaseFilename=AirBridge-0.2.0-Setup-x64
+OutputBaseFilename=AirBridge-0.3.0-Setup-x64
 OutputDir={#PayloadDir}\..
 UninstallDisplayIcon={app}\AirBridge.exe
 CloseApplications=yes

@@ -1,8 +1,8 @@
-# Install AirBridge 0.2.0
+# Install AirBridge 0.3.0
 
-Download **AirBridge-0.2.0-Setup-x64.exe** from the GitHub release. Plug in a **Realtek RTL8188FTV USB adapter, ID `0bda:f179`**, then run Setup. Follow the administrator prompts for WSL and USB support. If Setup requests a restart, restart Windows and run Setup again.
+Download **AirBridge-0.3.0-Setup-x64.exe** from the GitHub release. Plug in a **Realtek RTL8188FTV USB adapter, ID `0bda:f179`**, then run Setup. Follow the administrator prompts for WSL and USB support. If Setup requests a restart, restart Windows and run Setup again.
 
-This release supports x64 Windows 10 build 19041 or newer, including Windows 11, with hardware virtualization available. Setup requires internet access and about 2 GB of free space. Other Wi-Fi adapters are not supported by this release.
+This release supports x64 Windows 10 build 19041 or newer, including Windows 11, with hardware virtualization available. Setup requires internet access and about 2 GB of free space. RTL8188FTV is the physically tested adapter. The [adapter catalog](../runtime/adapters.tsv) lists additional recognized USB IDs that still need physical transfer testing.
 
 Setup installs the app for your Windows account and imports an Ubuntu-based `AirBridgeRuntime`. It downloads dependencies from their publishers and checks SHA-256 hashes. It installs WSL 2.7.13 and usbipd-win 5.3.0 if needed. The driver modules require `6.18.33.2-microsoft-standard-WSL2`. A newer, different kernel is not silently replaced. Existing distributions and WSL configuration are preserved.
 

@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$RuntimeArchive,
     [Parameter(Mandatory=$true)][string]$Compiler,
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\output\release-0.2.0')
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\output\release-0.3.0')
 )
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
@@ -13,7 +13,7 @@ Copy-Item -LiteralPath (Join-Path $repoRoot 'installer\dependencies.json') -Dest
 Copy-Item -LiteralPath (Join-Path $repoRoot 'installer\Setup-Runtime.ps1') -Destination $payloadDir
 Copy-Item -LiteralPath (Join-Path $repoRoot 'runtime\adapters.tsv') -Destination $payloadDir
 $hash = (Get-FileHash -LiteralPath $RuntimeArchive -Algorithm SHA256).Hash.ToLowerInvariant()
-@{ version='0.2.0'; kernel='6.18.33.2-microsoft-standard-WSL2'; sha256=$hash } |
+@{ version='0.3.0'; kernel='6.18.33.2-microsoft-standard-WSL2'; sha256=$hash } |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $payloadDir 'runtime-manifest.json') -Encoding UTF8
 # Include license texts from the resolved dependency sources, including git deps.
 $metadata = (& cargo metadata --locked --format-version 1 | ConvertFrom-Json)

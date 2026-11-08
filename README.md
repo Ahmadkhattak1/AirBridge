@@ -1,8 +1,8 @@
 # AirBridge
 
-Native Apple AirDrop for Windows. Download **AirBridge-0.2.0-Setup-x64.exe** from [Releases](https://github.com/Ahmadkhattak1/AirBridge/releases/latest). Setup installs the application and prepares its WSL radio runtime. A Realtek RTL8188FTV USB Wi-Fi adapter (`0bda:f179`) is required. See [installation instructions](docs/INSTALLATION.md) and [release notes](RELEASE-NOTES.md).
+Native Apple AirDrop for Windows. Download **AirBridge-0.3.0-Setup-x64.exe** from [Releases](https://github.com/Ahmadkhattak1/AirBridge/releases/latest). Setup installs the application and prepares its WSL radio runtime. A compatible USB Wi-Fi adapter is required. See [installation instructions](docs/INSTALLATION.md) and [release notes](RELEASE-NOTES.md).
 
-Both directions have completed on the test machine: iPhone-to-Windows photos/video and a Windows-to-iPhone text file. No iPhone app or web page is required. This release supports the named adapter and WSL kernel documented in the installation guide. Broader compatibility and sustained reliability still need device testing.
+Both directions have completed on the test machine with RTL8188FTV (`0bda:f179`). The runtime recognizes additional USB IDs listed in the [adapter catalog](runtime/adapters.tsv). Those adapters still need physical transfer testing.
 
 ## Current test machine
 
@@ -18,7 +18,7 @@ To send, enable **Everyone for 10 Minutes** on the unlocked iPhone. Choose **Sen
 
 The folder icon opens the save-location controls. You can open the folder, or choose a different local folder while stopped. Preferences are remembered in `%LOCALAPPDATA%\AirBridge\preferences.json`. Incoming byte counts come from the service; outgoing motion is an activity indication until the iPhone acknowledges the completed upload, not a made-up percentage.
 
-For a visual-only demonstration, launch `AirBridge.exe --preview`; its sample states never start the radio. The browser motion study is `output/ui-preview.html`. The previous executable is retained as `output/AirBridge-before-ui.exe`.
+For a visual-only demonstration, launch the application with `--preview`; its sample states never start the radio.
 
 The connection menu at the top shows readiness and offers copyable diagnostics. Device details appear there when setup fails. After a disconnect, AirBridge checks and reconnects automatically. An adapter that fails to power on may still need to be unplugged and reconnected.
 
